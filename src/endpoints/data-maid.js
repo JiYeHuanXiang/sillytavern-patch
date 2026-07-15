@@ -5,7 +5,7 @@ import express from 'express';
 import mime from 'mime-types';
 import { getSettingsBackupFilePrefix } from './settings.js';
 import { CHAT_BACKUPS_PREFIX } from './chats.js';
-import { isPathUnderParent, tryParse } from '../util.js';
+import { isPathUnderParent, tryParse, findPngFilesRecursive } from '../util.js';
 import { SETTINGS_FILE } from '../constants.js';
 
 const sha256 = str => crypto.createHash('sha256').update(str).digest('hex');
@@ -326,11 +326,9 @@ export class DataMaidService {
 
         try {
             const knownChatFolders = new Set();
-            const characters = await fs.promises.readdir(this.directories.characters, { withFileTypes: true });
-            for (const file of characters) {
-                if (file.isFile() && path.parse(file.name).ext === '.png') {
-                    knownChatFolders.add(file.name.replace('.png', ''));
-                }
+            const characters = findPngFilesRecursive(this.directories.characters);
+            for (const relPath of characters) {
+                knownChatFolders.add(relPath.replace('.png', ''));
             }
             const chatFolders = await fs.promises.readdir(this.directories.chats, { withFileTypes: true });
             for (const folder of chatFolders) {

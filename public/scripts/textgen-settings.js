@@ -186,7 +186,7 @@ export const textgenerationwebui_settings = {
     //truncation_length: 2048,
     ban_eos_token: false,
     skip_special_tokens: true,
-    include_reasoning: true,
+    include_reasoning: false,
     streaming: false,
     mirostat_mode: 0,
     mirostat_tau: 5,

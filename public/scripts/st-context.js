@@ -68,6 +68,7 @@ import {
     scrollOnMediaLoad,
     getOneCharacter,
     getCharacterSource,
+    loadSingleCharacter,
 } from '../script.js';
 import {
     extension_settings,
@@ -228,6 +229,7 @@ export function getContext() {
         powerUserSettings: power_user,
         getCharacters,
         getOneCharacter,
+        loadSingleCharacter,
         getCharacterCardFields,
         getCharacterSource,
         importFromExternalUrl,

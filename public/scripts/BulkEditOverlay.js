@@ -5,12 +5,13 @@ import {
     characters,
     event_types,
     eventSource,
-    getCharacters,
     getRequestHeaders,
     buildAvatarList,
     characterToEntity,
     printCharactersDebounced,
+    printCharacters,
     deleteCharacter,
+    loadSingleCharacter,
 } from '../script.js';
 
 import { favsToHotswap } from './RossAscends-mods.js';
@@ -57,6 +58,7 @@ class CharacterContextMenu {
 
         const data = await result.json();
         await eventSource.emit(event_types.CHARACTER_DUPLICATED, { oldAvatar: body.avatar_url, newAvatar: data.path });
+        return data.path;
     };
 
     /**
@@ -89,6 +91,11 @@ class CharacterContextMenu {
 
         if (!mergeResponse.ok) {
             mergeResponse.json().then(json => toastr.error(`Character not saved. Error: ${json.message}. Field: ${json.error}`));
+        } else {
+            // Sync the local character data so the list reflects the new fav state
+            // without requiring a full server reload.
+            character.data.extensions.fav = newFavState;
+            character.fav = newFavState;
         }
 
         const element = document.getElementById(`CharID${characterId}`);
@@ -781,7 +788,9 @@ class BulkEditOverlay {
         }
 
         await Promise.allSettled(promises);
-        await getCharacters();
+        // Incremental: local fav state was already synced in favorite();
+        // just refresh the rendered list instead of a full server reload.
+        printCharactersDebounced();
         await favsToHotswap();
         this.browseState();
     };
@@ -791,9 +800,17 @@ class BulkEditOverlay {
      *
      * @returns {Promise<number>}
      */
-    handleContextMenuDuplicate = () => Promise.all(this.selectedCharacters.map(async characterId => CharacterContextMenu.duplicate(characterId)))
-        .then(() => getCharacters())
-        .then(() => this.browseState());
+    handleContextMenuDuplicate = async () => {
+        const results = await Promise.all(this.selectedCharacters.map(async characterId => CharacterContextMenu.duplicate(characterId)));
+        // Incrementally load each duplicated character instead of a full server reload.
+        for (const newAvatar of results.filter(Boolean)) {
+            await loadSingleCharacter(newAvatar, { printList: false });
+        }
+        if (results.some(Boolean)) {
+            await printCharacters();
+        }
+        this.browseState();
+    };
 
     /**
      * Sequentially handle all character-to-persona conversions.

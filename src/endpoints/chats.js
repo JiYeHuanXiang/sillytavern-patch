@@ -21,6 +21,7 @@ import {
     tryDeleteFile,
     readFirstLine,
     isPathUnderParent,
+    findPngFilesRecursive,
 } from '../util.js';
 
 const isBackupEnabled = !!getConfigValue('backups.chat.enabled', true, 'boolean');
@@ -985,8 +986,7 @@ router.post('/recent', async function (request, response) {
         const pinnedChats = Array.isArray(request.body.pinned) ? request.body.pinned : [];
 
         const getCharacterChatFiles = async () => {
-            const pngDirents = await fs.promises.readdir(request.user.directories.characters, { withFileTypes: true });
-            const pngFiles = pngDirents.filter(e => e.isFile() && path.extname(e.name) === '.png').map(e => e.name);
+            const pngFiles = findPngFilesRecursive(request.user.directories.characters);
 
             for (const pngFile of pngFiles) {
                 const chatsDirectory = pngFile.replace('.png', '');

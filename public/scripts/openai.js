@@ -236,6 +236,7 @@ const openrouter_middleout_types = {
 
 export const reasoning_effort_types = {
     auto: 'auto',
+    disabled: 'disabled',
     low: 'low',
     medium: 'medium',
     high: 'high',
@@ -495,7 +496,7 @@ const default_settings = {
     names_behavior: character_names_behavior.DEFAULT,
     continue_postfix: continue_postfix_types.SPACE,
     custom_prompt_post_processing: custom_prompt_post_processing_types.NONE,
-    show_thoughts: true,
+    show_thoughts: false,
     reasoning_effort: reasoning_effort_types.auto,
     verbosity: verbosity_levels.auto,
     enable_web_search: false,
@@ -2549,6 +2550,8 @@ function getReasoningEffort(settings = null, model = null) {
             switch (settings.reasoning_effort) {
                 case reasoning_effort_types.auto:
                     return undefined;
+                case reasoning_effort_types.disabled:
+                    return reasoning_effort_types.disabled;
                 case reasoning_effort_types.max:
                     return reasoning_effort_types.max;
                 default:
@@ -4194,6 +4197,7 @@ function migrateChatCompletionSettings(settings) {
         { oldKey: 'openrouter_sort_models', oldValue: 'pricing.prompt', newKey: 'sort_models', newValue: 'pricing.prompt' },
         { oldKey: 'openrouter_sort_models', oldValue: 'context_length', newKey: 'sort_models', newValue: 'context_length' },
         { oldKey: 'openrouter_group_models', oldValue: true, newKey: 'group_models', newValue: true },
+        { oldKey: 'show_thoughts', oldValue: true, newKey: 'show_thoughts', newValue: false },
     ];
 
     for (const migration of migrateMap) {

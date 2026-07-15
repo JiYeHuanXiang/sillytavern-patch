@@ -212,6 +212,8 @@ import {
     applyTagsOnGroupSelect,
     tag_import_setting,
     applyCharacterTagsToMessageDivs,
+    syncSubfolderTags,
+    stripSubfolderTagsForSave,
 } from './scripts/tags.js';
 import { checkOpenRouterAuth, initSecrets, readSecretState } from './scripts/secrets.js';
 import { markdownExclusionExt } from './scripts/showdown-exclusion.js';
@@ -1232,7 +1234,7 @@ export async function getOneCharacter(avatarUrl) {
         getData.name = DOMPurify.sanitize(getData.name);
         getData.chat = String(getData.chat);
 
-        const indexOf = characters.findIndex(x => x.avatar === avatarUrl);
+        const indexOf = characters.findIndex(x => x?.avatar === avatarUrl);
 
         if (indexOf !== -1) {
             characters[indexOf] = getData;
@@ -1240,6 +1242,43 @@ export async function getOneCharacter(avatarUrl) {
             toastr.error(t`Character ${avatarUrl} not found in the list`, t`Error`, { timeOut: 5000, preventDuplicates: true });
         }
     }
+}
+
+/**
+ * Incrementally load a single character from the server and insert/replace it
+ * in the characters array, avoiding a full server reload via getCharacters().
+ * @param {string} avatarUrl Avatar key (relative path) of the character
+ * @param {boolean} [printList=true] Whether to refresh the rendered list afterwards
+ * @returns {Promise<object|null>} The loaded character, or null on failure
+ */
+export async function loadSingleCharacter(avatarUrl, { printList = true } = {}) {
+    const response = await fetch('/api/characters/get', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ avatar_url: avatarUrl }),
+    });
+
+    if (!response.ok) {
+        console.error(`Failed to load character: ${avatarUrl}`, response.status, response.statusText);
+        return null;
+    }
+
+    const getData = await response.json();
+    getData.name = DOMPurify.sanitize(getData.name);
+    getData.chat = String(getData.chat);
+
+    const indexOf = characters.findIndex(x => x?.avatar === avatarUrl);
+    if (indexOf !== -1) {
+        characters[indexOf] = getData;
+    } else {
+        characters.push(getData);
+    }
+
+    if (printList) {
+        await printCharacters();
+    }
+
+    return getData;
 }
 
 export function getCharacterSource(chId = this_chid) {
@@ -1323,6 +1362,10 @@ export async function getCharacters() {
         }
 
         await getGroups();
+        // Rebuild in-memory tags for character-card subdirectories before printing, so each subdirectory becomes a
+        // clickable folder block (powered by the existing 'Tags as Folder' mechanism). Auto-managed subdirectory tags
+        // are stripped back out at save time via stripSubfolderTagsForSave, so they never pollute the settings file.
+        syncSubfolderTags();
         await printCharacters(true);
     } else {
         console.error('Failed to fetch characters:', response.statusText);
@@ -6016,7 +6059,7 @@ export async function duplicateCharacter({ avatar = null, silent = false } = {})
     toastr.success(t`Character Duplicated`);
     const data = await response.json();
     await eventSource.emit(event_types.CHARACTER_DUPLICATED, { oldAvatar: targetAvatar, newAvatar: data.path });
-    await getCharacters();
+    await loadSingleCharacter(data.path);
 
     return data.path;
 }
@@ -7188,8 +7231,13 @@ export async function renameCharacter(name = null, { silent = false, renameChats
 
             // Unload current character
             setCharacterId(undefined);
-            // Reload characters list
-            await getCharacters();
+            // Incremental update: remove the old-avatar entry, then load the renamed
+            // character via the single-card endpoint instead of a full server reload.
+            const oldIdx = characters.findIndex(c => c?.avatar === oldAvatar);
+            if (oldIdx !== -1) {
+                characters.splice(oldIdx, 1);
+            }
+            await loadSingleCharacter(data.avatar);
 
             // Find newly renamed character
             const newChId = characters.findIndex(c => c.avatar == data.avatar);
@@ -8007,6 +8055,10 @@ export async function saveSettings(loopCounter = 0) {
         TempResponseLength.restore(null);
     }
 
+    // Strip auto-managed subdirectory tags before persisting, so the user's settings file only contains tags and
+    // references the user actually created. Subdirectory tags are rebuilt in memory on every character-list load.
+    const subfolderTagData = stripSubfolderTagsForSave();
+
     const payload = {
         firstRun: firstRun,
         accountStorage: accountStorage.getState(),
@@ -8024,8 +8076,10 @@ export async function saveSettings(loopCounter = 0) {
         horde_settings: horde_settings,
         power_user: power_user,
         extension_settings: extension_settings,
-        tags: tags,
-        tag_map: tag_map,
+        // Strip auto-managed subdirectory tags before persisting, so the user's settings file only contains
+        // tags and references they actually created. Subdirectory tags are rebuilt in memory on every load.
+        tags: subfolderTagData.tags,
+        tag_map: subfolderTagData.tagMap,
         nai_settings: nai_settings,
         kai_settings: kai_settings,
         oai_settings: oai_settings,
@@ -9795,7 +9849,7 @@ export async function createOrEditCharacter(e) {
 
             console.log(`new avatar id: ${avatarId}`);
             createTagMapFromList('#tagList', avatarId);
-            await getCharacters();
+            await loadSingleCharacter(avatarId);
 
             select_rm_info('char_create', avatarId, oldSelectedChar);
 
@@ -10438,7 +10492,13 @@ export async function processDroppedFiles(files, data = new Map()) {
  * @param {string[]} avatarFileNames character avatar filenames whose tags are to import
  */
 async function importCharactersTags(avatarFileNames) {
-    await getCharacters();
+    // Incrementally load each imported character instead of a full server reload.
+    for (const avatarFileName of avatarFileNames) {
+        await loadSingleCharacter(avatarFileName, { printList: false });
+    }
+    if (avatarFileNames.length > 0) {
+        await printCharacters();
+    }
     for (let i = 0; i < avatarFileNames.length; i++) {
         if (power_user.tag_import_setting !== tag_import_setting.NONE) {
             const importedCharacter = characters.find(character => character.avatar === avatarFileNames[i]);
@@ -10787,6 +10847,7 @@ export async function deleteCharacter(characterKey, { deleteChats = true } = {})
     }
 
     let deleted = false;
+    const deletedAvatars = [];
 
     for (const key of characterKey) {
         const character = characters.find(x => x.avatar == key);
@@ -10826,7 +10887,21 @@ export async function deleteCharacter(characterKey, { deleteChats = true } = {})
         }
 
         await eventSource.emit(event_types.CHARACTER_DELETED, { id: chid, character: character });
+        deletedAvatars.push(character.avatar);
         deleted = true;
+    }
+
+    // Incremental update: remove deleted characters from the local array
+    // instead of triggering a full server reload via getCharacters().
+    const previousAvatar = this_chid !== undefined ? characters[this_chid]?.avatar : null;
+    for (const avatar of deletedAvatars) {
+        const idx = characters.findIndex(c => c?.avatar === avatar);
+        if (idx !== -1) characters.splice(idx, 1);
+    }
+    // Reconcile the currently selected character id (avatars shifted after splice)
+    if (previousAvatar) {
+        const newCharacterId = characters.findIndex(x => x.avatar === previousAvatar);
+        setCharacterId(newCharacterId >= 0 ? newCharacterId : undefined);
     }
 
     await removeCharacterFromUI();
@@ -10847,7 +10922,9 @@ async function removeCharacterFromUI() {
     resetChatState();
     $(document.getElementById('rm_button_selected_ch')).children('h2').text('');
     restoreNeutralChat();
-    await getCharacters();
+    // The characters array was already updated incrementally by the caller;
+    // only refresh the rendered list instead of a full server reload.
+    await printCharacters();
     await printMessages();
     saveSettingsDebounced();
     await eventSource.emit(event_types.CHAT_CHANGED, getCurrentChatId());

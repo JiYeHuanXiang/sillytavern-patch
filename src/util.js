@@ -1391,6 +1391,81 @@ export function isPathUnderParent(parentPath, childPath) {
 }
 
 /**
+ * Recursively finds all .png files under a directory and returns their paths
+ * relative to that directory, using forward slashes (e.g. ["char.png", "sub/char.png"]).
+ *
+ * Intended for the character card directory, which this fork allows to contain nested
+ * folders. This implementation deliberately avoids Node's
+ * `readdir(..., { recursive: true })` / `Dirent.isFile()` / `Dirent.parentPath` because
+ * all three are unreliable on Android/Termux:
+ *  - `dirent.isFile()` depends on the underlying `d_type`, which on Termux's storage is
+ *    frequently `DT_UNKNOWN` and returns false for every entry.
+ *  - `dirent.parentPath` only exists on Node >= 18.17.
+ *  - `{ recursive: true }` internally relies on the same `d_type` to decide recursion.
+ * Instead we recurse manually and identify .png files purely by extension, with an
+ * `fs.statSync` fallback to confirm a file (not a directory) when the type is unknown.
+ *
+ * @param {string} dirPath - Directory to scan
+ * @param {Set<string>} [seen] - Internal cycle guard
+ * @returns {string[]} Array of relative paths to .png files (forward slashes)
+ */
+export function findPngFilesRecursive(dirPath, seen = new Set()) {
+    let entries;
+    try {
+        entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+        return [];
+    }
+
+    const result = [];
+    for (const entry of entries) {
+        const entryPath = path.join(dirPath, entry.name);
+
+        // d_type unknown: confirm via stat whether this is a file or a directory.
+        // On Termux isFile()/isDirectory() frequently return false for both, so a stat
+        // fallback is required to (a) still collect .png character cards and
+        // (b) still recurse into subdirectories that hold them.
+        let isFile = entry.isFile();
+        let isDir = entry.isDirectory();
+        if (!isFile && !isDir) {
+            try {
+                const stat = fs.statSync(entryPath);
+                isFile = stat.isFile();
+                isDir = stat.isDirectory();
+            } catch {
+                // Broken symlink / permission error: skip.
+                isFile = false;
+                isDir = false;
+            }
+        }
+
+        if (isDir) {
+            let realSubPath;
+            try {
+                realSubPath = fs.realpathSync(entryPath);
+            } catch {
+                continue;
+            }
+            if (seen.has(realSubPath)) {
+                continue; // symlink cycle guard
+            }
+            seen.add(realSubPath);
+            for (const rel of findPngFilesRecursive(entryPath, seen)) {
+                result.push(path.join(entry.name, rel));
+            }
+            continue;
+        }
+
+        if (isFile && entry.name.endsWith('.png')) {
+            result.push(entry.name);
+        }
+    }
+
+    // Normalize separators to forward slashes for cross-platform relative paths.
+    return result.map(f => f.replace(/\\/g, '/'));
+}
+
+/**
  * Checks if the given request is a file URL.
  * @param {string | URL | Request} request The request to check
  * @return {boolean} Returns true if the request is a file URL, false otherwise

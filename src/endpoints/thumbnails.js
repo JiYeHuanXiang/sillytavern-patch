@@ -17,6 +17,24 @@ export const apiRouter = express.Router();
 export const SKIPPED_EXTENSIONS = new Set(['.apng', '.mp4', '.webm', '.avi', '.mkv', '.flv', '.gif']);
 export const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.apng']);
 
+/**
+ * Safely normalizes a user-supplied file path by sanitizing each path segment individually,
+ * preserving the directory structure. Returns null if the path attempts traversal or contains
+ * invalid characters.
+ * @param {string} file - The file path to sanitize
+ * @returns {string|null} The safe path with platform-native separators, or null if invalid
+ */
+function safeThumbnailPath(file) {
+    const normalized = file.replace(/\\/g, '/');
+    const segments = normalized.split('/');
+    for (const segment of segments) {
+        if (segment === '..' || segment === '.') return null;
+        const sanitized = sanitize(segment);
+        if (sanitized !== segment) return null;
+    }
+    return segments.join(path.sep);
+}
+
 const thumbnailsEnabled = !!getConfigValue('thumbnails.enabled', true, 'boolean');
 const quality = Math.min(100, Math.max(1, parseInt(getConfigValue('thumbnails.quality', 95, 'number'))));
 const pngFormat = String(getConfigValue('thumbnails.format', 'jpg')).toLowerCase().trim() === 'png';
@@ -84,7 +102,10 @@ export function invalidateThumbnail(directories, type, file) {
     const folder = getThumbnailFolder(directories, type);
     if (folder === undefined) throw new Error('Invalid thumbnail type');
 
-    const pathToThumbnail = path.join(folder, sanitize(file));
+    const safeFile = safeThumbnailPath(file);
+    if (!safeFile) return;
+
+    const pathToThumbnail = path.join(folder, safeFile);
 
     if (fs.existsSync(pathToThumbnail)) {
         fs.unlinkSync(pathToThumbnail);
@@ -232,6 +253,12 @@ async function processSingleImage(file, originalFolder, thumbnailFolder, type) {
             ? await thumbImage.getBuffer(JimpMime.png)
             : await thumbImage.getBuffer(JimpMime.jpeg, { quality: quality, jpegColorSpace: 'ycbcr' });
 
+        // Ensure the thumbnail subdirectory exists
+        const thumbnailDir = path.dirname(pathToCachedFile);
+        if (!fs.existsSync(thumbnailDir)) {
+            fs.mkdirSync(thumbnailDir, { recursive: true });
+        }
+
         writeFileAtomicSync(pathToCachedFile, buffer);
 
         return { success: true, aspectRatio, resolution: thumbnailResolution };
@@ -254,12 +281,14 @@ publicRouter.get('/', async function (request, response) {
             return response.sendStatus(400);
         }
 
-        const file = sanitize(rawFile);
-        if (file !== rawFile) return response.sendStatus(403);
+        const file = safeThumbnailPath(rawFile);
+        if (!file) return response.sendStatus(403);
 
         const serveOriginal = () => {
             const folder = getOriginalFolder(request.user.directories, type);
             const pathToOriginalFile = path.resolve(path.join(folder, file));
+            const baseDir = path.resolve(folder);
+            if (!pathToOriginalFile.startsWith(baseDir)) return response.sendStatus(403);
             if (!fs.existsSync(pathToOriginalFile)) return response.sendStatus(404);
             invalidateFirefoxCache(pathToOriginalFile, request, response);
             return response.sendFile(pathToOriginalFile);

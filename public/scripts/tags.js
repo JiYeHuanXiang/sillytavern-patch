@@ -52,6 +52,8 @@ export {
     sortTags,
     compareTagsForSort,
     removeTagFromMap,
+    syncSubfolderTags,
+    stripSubfolderTagsForSave,
 };
 
 const CHARACTER_FILTER_SELECTOR = '#rm_characters_block .rm_tag_filter';
@@ -357,6 +359,34 @@ let tag_map = {};
  */
 let expanded_tags_cache = [];
 
+//----------------------------------------------------------------------------------------------------------------------
+// Subdirectory-as-tag support
+//----------------------------------------------------------------------------------------------------------------------
+/**
+ * The name of the (hidden) marker property written onto tag objects that are auto-managed to mirror a character-card
+ * subdirectory. Tags carrying this flag are never persisted to the user's settings file — they are rebuilt in memory
+ * on every character list load and stripped out right before serialization in `saveSettings`.
+ *
+ * Use a non-enumerable-ish-looking string key. A plain boolean property is fine here: tag objects are simple data
+ * records (created via object literals in `newTag`) and are JSON-serialized only by our own `stripSubfolderTagsForSave`
+ * helper, which deletes this key explicitly.
+ */
+const SUBFOLDER_TAG_MARKER = 'is_subfolder_tag';
+
+/**
+ * Default folder type for auto-created subdirectory tags. 'OPEN' means the folder block is always visible in the
+ * character list (a clickable entry point) while its characters stay visible — the least surprising default for a
+ * "category" coming from a directory structure. Users can flip a tag to 'CLOSED' from the tag manager afterwards.
+ */
+const SUBFOLDER_TAG_DEFAULT_FOLDER_TYPE = 'OPEN';
+
+/**
+ * Set of tag ids that are currently managed as subdirectory tags. Mirrors the `is_subfolder_tag` marker kept on each
+ * tag object so that lookups / cleanup stay O(1). Reset and rebuilt on every `syncSubfolderTags` call.
+ * @type {Set<string>}
+ */
+const subFolderTagIds = new Set();
+
 /**
  * Applies the basic filter for the current state of the tags and their selection on an entity list.
  * @param {Array<Object>} entities List of entities for display, consisting of tags, characters and groups.
@@ -627,6 +657,205 @@ function createTagMapFromList(listElement, key) {
     const tagIds = [...($(listElement).find('.tag').map((_, el) => $(el).attr('id')))];
     tag_map[key] = tagIds;
     saveSettingsDebounced();
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+// Subdirectory-as-tag: core sync logic
+//----------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Extracts the subdirectory name (the path segment before the last `/`) from a character avatar string.
+ * Returns `null` for cards that live directly in the root characters directory (no `/`).
+ *
+ * Example: `'Fantasy/Aria.png'` -> `'Fantasy'`, `'Aria.png'` -> `null`.
+ *
+ * @param {string} avatar The character avatar relative path (e.g. `'Fantasy/Aria.png'`).
+ * @returns {string|null} The subdirectory name, or null when the avatar has no parent directory.
+ */
+function getSubfolderFromAvatar(avatar) {
+    if (typeof avatar !== 'string' || avatar.length === 0) {
+        return null;
+    }
+    const slashIndex = avatar.lastIndexOf('/');
+    if (slashIndex <= 0) {
+        // No slash, or a leading slash (root) — treat as top-level.
+        return null;
+    }
+    const folder = avatar.slice(0, slashIndex);
+    // The directory name may itself contain '/', but only the immediate parent folder is registered as a category.
+    // An empty result (e.g. avatar was just '/') is not a valid folder name.
+    return folder.length > 0 ? folder : null;
+}
+
+/**
+ * Marks a tag object as a managed subdirectory tag in-place.
+ * @param {object} tag Tag object to mark.
+ */
+function markAsSubfolderTag(tag) {
+    tag[SUBFOLDER_TAG_MARKER] = true;
+}
+
+/**
+ * @param {object} tag Tag object to test.
+ * @returns {boolean} Whether the tag is a managed subdirectory tag.
+ */
+function isSubfolderTag(tag) {
+    return !!tag && tag[SUBFOLDER_TAG_MARKER] === true;
+}
+
+/**
+ * Synchronizes in-memory tag state so that every character whose avatar lives inside a subdirectory gets a tag named
+ * after that subdirectory (auto-created if missing), and every previously-managed subdirectory tag whose folder no
+ * longer exists is cleaned up.
+ *
+ * Idempotent and persistence-safe: it mutates only the in-memory `tags` array and `tag_map` object, and it never
+ * calls `saveSettingsDebounced()`. Persisted settings stay clean via {@link stripSubfolderTagsForSave}, which the
+ * save path invokes at serialization time.
+ *
+ * Must be called after `characters` is populated (e.g. inside `getCharacters`) and before `printCharacters`, so the
+ * rebuilt tags participate in entity-list construction and filtering.
+ *
+ * @returns {boolean} Whether any in-memory state was changed.
+ */
+function syncSubfolderTags() {
+    let changed = false;
+
+    // --- Phase 1: Scan avatars to find the set of subdirectory names that currently exist on disk. ---
+    /** @type {Map<string, string>} dirName -> tag id (resolved in Phase 2; '' until then) */
+    const liveDirToTagId = new Map();
+    for (const character of characters) {
+        const dir = getSubfolderFromAvatar(character?.avatar);
+        if (dir && !liveDirToTagId.has(dir)) {
+            liveDirToTagId.set(dir, '');
+        }
+    }
+
+    // --- Phase 2: Resolve or auto-create a tag for each live directory. ---
+    // `liveManagedTagIds` = ids of tags that are BOTH (a) managed subfolder tags AND (b) for a currently-live dir.
+    // These get injected into tag_map. A genuine user-created tag with the same name is left as-is (not marked
+    // managed) and we do NOT auto-inject its id, so we never silently 'adopt' the user's tag.
+    /** @type {Set<string>} */
+    const liveManagedTagIds = new Set();
+    for (const dirName of liveDirToTagId.keys()) {
+        let tag = tags.find(t => equalsIgnoreCaseAndAccents(t.name, dirName));
+        if (!tag) {
+            tag = newTag(dirName);
+            tag.folder_type = SUBFOLDER_TAG_DEFAULT_FOLDER_TYPE;
+            markAsSubfolderTag(tag);
+            tags.push(tag);
+            changed = true;
+        }
+        liveDirToTagId.set(dirName, tag.id);
+        if (isSubfolderTag(tag)) {
+            liveManagedTagIds.add(tag.id);
+        }
+    }
+
+    // --- Phase 3: Rebuild the exported managed-id set to the live set (a cheap cache; the marker on each tag is the
+    // source of truth used by stripSubfolderTagsForSave). ---
+    subFolderTagIds.clear();
+    for (const id of liveManagedTagIds) {
+        subFolderTagIds.add(id);
+    }
+
+    // --- Phase 4: Delete managed tags whose directory no longer exists (dir renamed/deleted/cards moved out). ---
+    // Record their ids first so the tag_map sweep in Phase 6 can purge dangling references.
+    /** @type {Set<string>} ids of managed tags that are now stale and must be purged everywhere */
+    const staleManagedTagIds = new Set();
+    for (let i = tags.length - 1; i >= 0; i--) {
+        const tag = tags[i];
+        if (isSubfolderTag(tag) && !liveManagedTagIds.has(tag.id)) {
+            staleManagedTagIds.add(tag.id);
+            tags.splice(i, 1);
+            changed = true;
+        }
+    }
+
+    // --- Phase 5: Reconcile tag_map — inject the right dir-tag id where missing, drop stale/live-mismatch ids. ---
+    for (const character of characters) {
+        const key = character?.avatar;
+        if (typeof key !== 'string' || key.length === 0) {
+            continue;
+        }
+        const dir = getSubfolderFromAvatar(key);
+        const dirTagId = dir ? (liveDirToTagId.get(dir) ?? '') : '';
+        // Only auto-inject when the resolved tag is actually the managed subfolder tag for this dir. If a user tag
+        // with the same name exists we leave membership to the user.
+        const desiredManagedId = (dirTagId && liveManagedTagIds.has(dirTagId)) ? dirTagId : '';
+
+        if (!Array.isArray(tag_map[key])) {
+            tag_map[key] = [];
+        }
+        const before = tag_map[key];
+        // Keep all user tags (non-managed ids). Among managed ids, keep only the desired one for this character and
+        // drop everything else (ids for other dirs, plus all stale ids).
+        const kept = before.filter(id => !staleManagedTagIds.has(id) && (!subFolderTagIds.has(id) || id === desiredManagedId));
+        if (desiredManagedId && !kept.includes(desiredManagedId)) {
+            kept.push(desiredManagedId);
+        }
+        if (kept.length !== before.length || kept.some((v, idx) => v !== before[idx])) {
+            tag_map[key] = kept;
+            changed = true;
+        }
+    }
+
+    // --- Phase 6: Purge stale managed ids from tag_map rows that no longer have a matching character. ---
+    if (staleManagedTagIds.size > 0) {
+        const liveAvatars = new Set(characters.map(c => c?.avatar).filter(a => typeof a === 'string' && a.length > 0));
+        for (const key of Object.keys(tag_map)) {
+            if (liveAvatars.has(key) || !Array.isArray(tag_map[key])) {
+                continue;
+            }
+            const beforeLen = tag_map[key].length;
+            tag_map[key] = tag_map[key].filter(id => !staleManagedTagIds.has(id));
+            if (tag_map[key].length !== beforeLen) {
+                changed = true;
+            }
+        }
+    }
+
+    return changed;
+}
+
+/**
+ * Produces a sanitized copy of the tags array and tag_map object with all managed subdirectory tags and their
+ * references removed, so the user's persisted settings file never accumulates auto-generated entries.
+ *
+ * The original in-memory `tags` / `tag_map` are left untouched — only the returned copies are clean.
+ *
+ * @returns {{tags: object[], tagMap: {[identifier: string]: string[]}}} A subfolder-tag-free copy.
+ */
+function stripSubfolderTagsForSave() {
+    // Defensive: strip every tag carrying the marker, regardless of the current sync state, so nothing leaks even
+    // if sync hasn't run yet or ran against stale data.
+    const idsToStrip = new Set();
+    for (const tag of tags) {
+        if (isSubfolderTag(tag)) {
+            idsToStrip.add(tag.id);
+        }
+    }
+
+    const cleanTags = tags
+        .filter(t => !isSubfolderTag(t))
+        .map(t => {
+            // Shallow clone + drop the marker key defensively, in case a managed tag was somehow left with it.
+            // This never mutates the original.
+            const clone = { ...t };
+            delete clone[SUBFOLDER_TAG_MARKER];
+            return clone;
+        });
+
+    /** @type {{[identifier: string]: string[]}} */
+    const cleanTagMap = {};
+    for (const key of Object.keys(tag_map)) {
+        if (!Array.isArray(tag_map[key])) {
+            cleanTagMap[key] = tag_map[key];
+            continue;
+        }
+        cleanTagMap[key] = tag_map[key].filter(id => !idsToStrip.has(id));
+    }
+
+    return { tags: cleanTags, tagMap: cleanTagMap };
 }
 
 /**

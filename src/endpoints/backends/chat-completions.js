@@ -1,4 +1,4 @@
-/* eslint-disable dot-notation */
+﻿/* eslint-disable dot-notation */
 import process from 'node:process';
 import util from 'node:util';
 import express from 'express';
@@ -1080,6 +1080,9 @@ async function sendDeepSeekRequest(request, response) {
             bodyParams['reasoning_effort'] = request.body.reasoning_effort;
         }
 
+        const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
+        const disabledThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !request.body.include_reasoning);
+
         const requestBody = {
             'messages': processedMessages,
             'model': request.body.model,
@@ -1091,7 +1094,7 @@ async function sendDeepSeekRequest(request, response) {
             'top_p': request.body.top_p,
             'stop': request.body.stop,
             'seed': request.body.seed,
-            'thinking': { type: request.body.include_reasoning ? 'enabled' : 'disabled' },
+            'thinking': { type: disabledThinking ? 'disabled' : 'enabled' },
             ...bodyParams,
         };
 
@@ -2219,13 +2222,29 @@ router.post('/generate', async function (request, response) {
             // OpenRouter needs to pass the Referer and X-Title: https://openrouter.ai/docs#requests
             headers = { ...OPENROUTER_HEADERS };
             const includeReasoning = Boolean(request.body.include_reasoning);
+            
+            // Check if using DeepSeek model through OpenRouter
+            const isDeepSeekModel = /^deepseek-/.test(request.body.model);
+            
             bodyParams = {
                 transforms: getOpenRouterTransforms(request),
                 plugins: getOpenRouterPlugins(request),
-                reasoning: {
-                    exclude: !includeReasoning,
-                },
             };
+            
+            // For DeepSeek models, use thinking parameter directly
+            if (isDeepSeekModel) {
+                const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
+                const disableThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !includeReasoning);
+                bodyParams['thinking'] = {
+                    type: disableThinking ? 'disabled' : 'enabled',
+                };
+                console.debug('DeepSeek model detected, setting thinking:', bodyParams.thinking);
+            } else {
+                // For other models, use reasoning.exclude
+                bodyParams.reasoning = {
+                    exclude: !includeReasoning,
+                };
+            }
 
             if (request.body.min_p !== undefined) {
                 bodyParams['min_p'] = request.body.min_p;
@@ -2470,7 +2489,22 @@ router.post('/generate', async function (request, response) {
             apiUrl = defaultApiUrl;
             apiKey = readSecret(request.user.directories, SECRET_KEYS.SILICONFLOW, request.body.secret_id);
             headers = {};
+            
+            // Check if using DeepSeek model
+            const isDeepSeekModel = /^deepseek-/.test(request.body.model);
+            
             bodyParams = {};
+            
+            // For DeepSeek models, add thinking parameter
+            if (isDeepSeekModel) {
+                const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
+                const disableThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !request.body.include_reasoning);
+                bodyParams['thinking'] = {
+                    type: disableThinking ? 'disabled' : 'enabled',
+                };
+                console.debug('SiliconFlow DeepSeek model detected, setting thinking:', bodyParams.thinking);
+            }
+            
             if (request.body.json_schema) {
                 setJsonObjectFormat(bodyParams, request.body.messages, request.body.json_schema);
             }
@@ -2568,6 +2602,20 @@ router.post('/generate', async function (request, response) {
             'n': request.body.n,
             ...bodyParams,
         };
+
+        // Universal DeepSeek thinking control
+        const isDeepSeekModel = /^deepseek-/.test(request.body.model);
+        if (isDeepSeekModel && !requestBody.thinking) {
+            const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
+            const shouldDisable = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && request.body.include_reasoning === false);
+            if (shouldDisable) {
+                requestBody['thinking'] = { type: 'disabled' };
+                console.debug('Universal DeepSeek thinking control: disabled thinking for', request.body.model);
+            } else if (hasActiveEffort && !request.body.include_reasoning) {
+                requestBody['thinking'] = { type: 'enabled' };
+                console.debug('Universal DeepSeek thinking control: enabled thinking for', request.body.model, '(reasoning effort override)');
+            }
+        }
 
         if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM) {
             excludeKeysByYaml(requestBody, request.body.custom_exclude_body);
@@ -2894,3 +2942,4 @@ router.post('/process', async function (request, response) {
         return response.sendStatus(500);
     }
 });
+

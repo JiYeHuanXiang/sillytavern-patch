@@ -2157,6 +2157,7 @@
                                             </label>
                                             <select id="openai_reasoning_effort">
                                                 <option data-i18n="openai_reasoning_effort_auto" value="auto">Auto</option>
+                                                <option data-i18n="openai_reasoning_effort_disabled" value="disabled">Disable thinking</option>
                                                 <option data-i18n="openai_reasoning_effort_minimum" value="min">Minimum</option>
                                                 <option data-i18n="openai_reasoning_effort_low" value="low">Low</option>
                                                 <option data-i18n="openai_reasoning_effort_medium" value="medium">Medium</option>
@@ -2179,6 +2180,11 @@
                                                 <br>
                                                 <span data-i18n="Allocates a portion of the response length for thinking (Flash 2.5/Pro 2.5) (min: 0/128 tokens, low: 10%, medium: 25%, high: 50%, max: 24576/32768 tokens). Auto lets the model decide.">
                                                     Allocates a portion of the response length for thinking (Flash 2.5/Pro 2.5) (min: 0/128 tokens, low: 10%, medium: 25%, high: 50%, max: 24576/32768 tokens). Auto lets the model decide.
+                                                </span>
+                                            </div>
+                                            <div class="toggle-description justifyLeft marginBot5" data-source="deepseek">
+                                                <span data-i18n="Select 'Disable thinking' to turn off deep thinking mode for DeepSeek models and save tokens.">
+                                                    Select 'Disable thinking' to turn off deep thinking mode for DeepSeek models and save tokens.
                                                 </span>
                                             </div>
                                         </div>
@@ -3932,7 +3938,6 @@
                             </select>
                             <h4 data-i18n="Z.AI Model">Z.AI Model</h4>
                             <select id="model_zai_select">
-                                <option value="glm-5.2">glm-5.2</option>
                                 <option value="glm-5-turbo">glm-5-turbo</option>
                                 <option value="glm-5v-turbo">glm-5v-turbo</option>
                                 <option value="glm-5.1">glm-5.1</option>

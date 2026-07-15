@@ -13,8 +13,8 @@ import { Jimp, JimpMime } from '../jimp.js';
 import storage from 'node-persist';
 
 import { AVATAR_WIDTH, AVATAR_HEIGHT, DEFAULT_AVATAR_PATH } from '../constants.js';
-import { default as validateAvatarUrlMiddleware, getFileNameValidationFunction, forbiddenRegExp } from '../middleware/validateFileName.js';
-import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements } from '../util.js';
+import { default as validateAvatarUrlMiddleware, getFileNameValidationFunction, forbiddenRegExp, isPathSafe } from '../middleware/validateFileName.js';
+import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements, findPngFilesRecursive } from '../util.js';
 import { TavernCardValidator } from '../validator/TavernCardValidator.js';
 import { parse, read, write } from '../character-card-parser.js';
 import { readWorldInfoFile } from './worldinfo.js';
@@ -132,9 +132,9 @@ class DiskCache {
             const cache = await this.instance();
             const validKeys = new Set();
             for (const dir of directoriesList) {
-                const files = fs.readdirSync(dir.characters, { withFileTypes: true });
-                for (const file of files.filter(f => f.isFile() && path.extname(f.name) === '.png')) {
-                    const filePath = path.join(dir.characters, file.name);
+                const files = findPngFilesRecursive(dir.characters);
+                for (const file of files) {
+                    const filePath = path.join(dir.characters, file);
                     const cacheKey = getCacheKey(filePath);
                     validKeys.add(path.parse(cache.getDatumPath(cacheKey)).base);
                 }
@@ -1057,7 +1057,7 @@ router.post('/rename', validateAvatarUrlMiddleware, async function (request, res
 
     const oldAvatarName = request.body.avatar_url;
     const newName = sanitize(request.body.new_name);
-    const oldInternalName = path.parse(request.body.avatar_url).name;
+    const oldInternalName = oldAvatarName.replace('.png', '');
     const newInternalName = getPngName(newName, request.user.directories);
     const newAvatarName = `${newInternalName}.png`;
 
@@ -1344,8 +1344,7 @@ router.post('/merge-attributes', getFileNameValidationFunction('avatar'), async 
                 targetAvatars = avatars;
             } else {
                 // Empty array → scan all characters in the directory
-                const files = fs.readdirSync(request.user.directories.characters);
-                targetAvatars = files.filter(file => path.extname(file).toLowerCase() === '.png');
+                targetAvatars = findPngFilesRecursive(request.user.directories.characters);
             }
 
             const updated = [];
@@ -1416,8 +1415,8 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
         return response.sendStatus(400);
     }
 
-    if (request.body.avatar_url !== sanitize(request.body.avatar_url)) {
-        console.error('Malicious filename prevented');
+    if (!isPathSafe(request.user.directories.characters, request.body.avatar_url)) {
+        console.error('Path traversal prevented');
         return response.sendStatus(403);
     }
 
@@ -1437,7 +1436,7 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
 
     if (request.body.delete_chats == true) {
         try {
-            await fs.promises.rm(path.join(request.user.directories.chats, sanitize(dir_name)), { recursive: true, force: true });
+            await fs.promises.rm(path.join(request.user.directories.chats, dir_name), { recursive: true, force: true });
         } catch (err) {
             console.error(err);
             return response.sendStatus(500);
@@ -1463,8 +1462,7 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
  */
 router.post('/all', async function (request, response) {
     try {
-        const files = fs.readdirSync(request.user.directories.characters);
-        const pngFiles = files.filter(file => file.endsWith('.png'));
+        const pngFiles = findPngFilesRecursive(request.user.directories.characters);
         const processingPromises = pngFiles.map(file => processCharacter(file, request.user.directories, { shallow: useShallowCharacters }));
         const data = (await Promise.all(processingPromises)).filter(c => c.name);
         return response.send(data);
@@ -1603,8 +1601,8 @@ router.post('/duplicate', validateAvatarUrlMiddleware, async function (request, 
             console.debug(request.body);
             return response.sendStatus(400);
         }
-        let filename = path.join(request.user.directories.characters, sanitize(request.body.avatar_url));
-        if (!fs.existsSync(filename)) {
+        let filename = path.join(request.user.directories.characters, request.body.avatar_url);
+        if (!fs.existsSync(filename) || !isPathSafe(request.user.directories.characters, request.body.avatar_url)) {
             console.error('file for dupe not found', filename);
             return response.sendStatus(404);
         }
@@ -1647,9 +1645,9 @@ router.post('/export', validateAvatarUrlMiddleware, async function (request, res
             return response.sendStatus(400);
         }
 
-        let filename = path.join(request.user.directories.characters, sanitize(request.body.avatar_url));
+        let filename = path.join(request.user.directories.characters, request.body.avatar_url);
 
-        if (!fs.existsSync(filename)) {
+        if (!fs.existsSync(filename) || !isPathSafe(request.user.directories.characters, request.body.avatar_url)) {
             return response.sendStatus(404);
         }
 
