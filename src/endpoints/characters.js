@@ -24,6 +24,7 @@ import { getUserDirectories } from '../users.js';
 import { getChatInfo } from './chats.js';
 import { ByafParser } from '../byaf.js';
 import { CharXParser, persistCharXAssets } from '../charx.js';
+import { characterIndex } from './character-index.js';
 import cacheBuster from '../middleware/cacheBuster.js';
 
 // With 100 MB limit it would take roughly 3000 characters to reach this limit
@@ -161,12 +162,13 @@ export const diskCache = new DiskCache();
 /**
  * Gets the cache key for the specified image file.
  * @param {string} inputFile - Path to the image file
+ * @param {fs.Stats} [stat] - Precomputed fs.Stats to avoid a redundant stat call
  * @returns {string} - Cache key
  */
-function getCacheKey(inputFile) {
-    if (fs.existsSync(inputFile)) {
-        const stat = fs.statSync(inputFile);
-        return `${inputFile}-${stat.mtimeMs}`;
+function getCacheKey(inputFile, stat) {
+    const s = stat ?? (fs.existsSync(inputFile) ? fs.statSync(inputFile) : null);
+    if (s) {
+        return `${inputFile}-${s.mtimeMs}`;
     }
 
     return inputFile;
@@ -175,11 +177,12 @@ function getCacheKey(inputFile) {
 /**
  * Reads the character card from the specified image file.
  * @param {string} inputFile - Path to the image file
- * @param {string} inputFormat - 'png'
+ * @param {string} [inputFormat='png'] - 'png'
+ * @param {fs.Stats} [stat] - Precomputed fs.Stats, to skip the stat inside getCacheKey
  * @returns {Promise<string | undefined>} - Character card data
  */
-async function readCharacterData(inputFile, inputFormat = 'png') {
-    const cacheKey = getCacheKey(inputFile);
+async function readCharacterData(inputFile, inputFormat = 'png', stat) {
+    const cacheKey = getCacheKey(inputFile, stat);
     if (memoryCache.has(cacheKey)) {
         return memoryCache.get(cacheKey);
     }
@@ -257,6 +260,16 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         const outputImagePath = path.join(request.user.directories.characters, `${outputFile}.png`);
 
         writeFileAtomicSync(outputImagePath, outputImage);
+
+        // Invalidate the character index entry for the written file. The next list load will see a
+        // changed (mtimeMs/size) fingerprint and re-parse; we just mark dirty so the on-disk index
+        // eventually reflects the new fingerprint (a stale fingerprint left behind would be cleared
+        // by prune() on the next /all, but marking avoids an extra prune cycle).
+        if (useShallowCharacters) {
+            const relPath = `${outputFile}.png`;
+            characterIndex.delete(request.user.profile.handle, relPath);
+            characterIndex.flushSync();
+        }
         return true;
     } catch (err) {
         console.error(err);
@@ -357,6 +370,24 @@ const calculateChatSize = (charDir) => {
     return { chatSize, dateLastChat };
 };
 
+/**
+ * Returns the mtime of a character's chat directory (0 if it doesn't exist). Used as an incremental
+ * fingerprint for the chat stats cache: when it is unchanged, the cached chat_size / date_last_chat
+ * can be reused; when it changes, we recompute. (Appending a message does not change dir mtime, but
+ * this cost is absorbed lazily whenever the chat dir is otherwise touched — see usage in
+ * processCharacterList, which always recomputes stats for index-miss entries.)
+ * @param {string} charDir The chat directory path
+ * @returns {number}
+ */
+const getChatDirMtime = (charDir) => {
+    try {
+        const stat = fs.statSync(charDir);
+        return stat.mtimeMs;
+    } catch {
+        return 0;
+    }
+};
+
 // Calculate the total string length of the data object
 const calculateDataSize = (data) => {
     return typeof data === 'object' ? Object.values(data).reduce((acc, val) => acc + String(val).length, 0) : 0;
@@ -401,21 +432,22 @@ const toShallow = (character) => {
  * @param  {import('../users.js').UserDirectoryList} directories User directories
  * @param  {object} options Options for the character processing
  * @param  {boolean} options.shallow If true, only return the core character's metadata
+ * @param  {fs.Stats} [options.charStat] Precomputed fs.Stats for the png file, to avoid a redundant stat.
  * @return {Promise<object>}     A Promise that resolves when the character processing is done.
  */
-const processCharacter = async (item, directories, { shallow }) => {
+const processCharacter = async (item, directories, { shallow, charStat }) => {
     try {
         const imgFile = path.join(directories.characters, item);
-        const imgData = await readCharacterData(imgFile);
+        const imgData = await readCharacterData(imgFile, 'png', charStat);
         if (imgData === undefined) throw new Error('Failed to read character file');
 
         let jsonObject = getCharaCardV2(JSON.parse(imgData), directories, false);
         jsonObject.avatar = item;
         const character = jsonObject;
         character.json_data = imgData;
-        const charStat = fs.statSync(path.join(directories.characters, item));
-        character.date_added = charStat.ctimeMs;
-        character.create_date = jsonObject.create_date || new Date(Math.round(charStat.ctimeMs)).toISOString();
+        const stat = charStat ?? fs.statSync(path.join(directories.characters, item));
+        character.date_added = stat.ctimeMs;
+        character.create_date = jsonObject.create_date || new Date(Math.round(stat.ctimeMs)).toISOString();
         const chatsDirectory = path.join(directories.chats, item.replace('.png', ''));
 
         const { chatSize, dateLastChat } = calculateChatSize(chatsDirectory);
@@ -438,6 +470,69 @@ const processCharacter = async (item, directories, { shallow }) => {
             chat_size: 0,
         };
     }
+};
+
+/**
+ * Builds the shallow character list used by the character picker, using the on-disk character index
+ * to skip reading/parsing PNG files whose (mtimeMs, size, ctimeMs) fingerprint is unchanged.
+ *
+ * For each png:
+ *   - stat the file once (this stat is passed through to processCharacter via {charStat}, avoiding
+ *     the previous duplicate stat inside processCharacter + getCacheKey);
+ *   - if the index has a fresh shallow entry under the same fingerprint, reuse it (still refreshing
+ *     chat_size / date_last_chat when the chat-dir fingerprint changed);
+ *   - otherwise parse the full card via processCharacter({shallow:true}) and write the result back
+ *     into the index.
+ *
+ * @param {string[]} pngFiles Relative png paths (forward slashes)
+ * @param {import('../users.js').UserDirectoryList} directories User directories
+ * @param {string} handle User handle (for index keying)
+ * @returns {Promise<object[]>} List of shallow character objects (filtered to those with a name)
+ */
+const processCharacterList = async (pngFiles, directories, handle) => {
+    const result = [];
+    const validRelPaths = new Set(pngFiles);
+
+    for (const item of pngFiles) {
+        const imgPath = path.join(directories.characters, item);
+        let stat;
+        try {
+            stat = fs.statSync(imgPath);
+        } catch {
+            // File vanished between listing and stat (race); skip.
+            continue;
+        }
+        const pngStat = { mtimeMs: stat.mtimeMs, size: stat.size, ctimeMs: stat.ctimeMs };
+        const chatsDirectory = path.join(directories.chats, item.replace('.png', ''));
+        const chatDirMtime = getChatDirMtime(chatsDirectory);
+
+        const cached = characterIndex.get(handle, item, pngStat);
+        if (cached) {
+            const shallow = cached.shallow;
+            // chat stats are not part of the PNG fingerprint; refresh them when the chat-dir
+            // fingerprint changed, otherwise reuse the cached values.
+            if (cached.chatDirMtime !== chatDirMtime) {
+                const { chatSize, dateLastChat } = calculateChatSize(chatsDirectory);
+                shallow.chat_size = chatSize;
+                shallow.date_last_chat = dateLastChat;
+                // Persist the refreshed fingerprint + stats without re-parsing the card.
+                characterIndex.set(handle, item, pngStat, chatDirMtime, shallow);
+            }
+            result.push(shallow);
+            continue;
+        }
+
+        // Cache miss: parse the full card and cache its shallow form.
+        const character = await processCharacter(item, directories, { shallow: true, charStat: stat });
+        if (character?.name) {
+            characterIndex.set(handle, item, pngStat, chatDirMtime, character);
+            result.push(character);
+        }
+    }
+
+    // Drop index entries for files that no longer exist on disk.
+    characterIndex.prune(handle, validRelPaths);
+    return result;
 };
 
 /**
@@ -1032,7 +1127,9 @@ router.post('/create', getFileNameValidationFunction('file_name'), async functio
         const avatarName = `${internalName}.png`;
         const chatsPath = path.join(request.user.directories.chats, internalName);
 
-        if (!fs.existsSync(chatsPath)) fs.mkdirSync(chatsPath);
+        // recursive: internalName may contain path separators for characters created inside a
+        // subfolder (avatar stored as "folder/character"), requiring intermediate chat dirs.
+        if (!fs.existsSync(chatsPath)) fs.mkdirSync(chatsPath, { recursive: true });
 
         if (!request.file) {
             await writeCharacterData(DEFAULT_AVATAR_PATH, char, internalName, request);
@@ -1087,6 +1184,13 @@ router.post('/rename', validateAvatarUrlMiddleware, async function (request, res
 
         // Remove the old character file
         fs.unlinkSync(oldAvatarPath);
+
+        // The index entry keyed under the old relative path is now stale; drop it and mark dirty so
+        // the rename is reflected without waiting for the next /all prune.
+        if (useShallowCharacters) {
+            characterIndex.delete(request.user.profile.handle, oldAvatarName);
+            characterIndex.flushSync();
+        }
 
         // Return new avatar name to ST
         return response.send({ avatar: newAvatarName });
@@ -1373,6 +1477,8 @@ router.post('/merge-attributes', getFileNameValidationFunction('avatar'), async 
                     const result = await mergeCharacterUpdate(avatarPath, avatar, data, request, shouldSkip);
                     if (result.ok) {
                         updated.push(avatar);
+                        // mergeCharacterUpdate wrote via writeCharacterData, which already invalidated
+                        // the index entry for this avatar; nothing more to do here.
                     } else if (result.skipped) {
                         skipped.push(avatar);
                     } else {
@@ -1427,6 +1533,12 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
 
     fs.unlinkSync(avatarPath);
     invalidateThumbnail(request.user.directories, 'avatar', request.body.avatar_url);
+
+    // Remove the deleted card from the index so it doesn't linger until the next /all prune.
+    if (useShallowCharacters) {
+        characterIndex.delete(request.user.profile.handle, request.body.avatar_url);
+        characterIndex.flushSync();
+    }
     let dir_name = (request.body.avatar_url.replace('.png', ''));
 
     if (!dir_name.length) {
@@ -1463,7 +1575,13 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
 router.post('/all', async function (request, response) {
     try {
         const pngFiles = findPngFilesRecursive(request.user.directories.characters);
-        const processingPromises = pngFiles.map(file => processCharacter(file, request.user.directories, { shallow: useShallowCharacters }));
+        if (useShallowCharacters) {
+            // Fast path: serve the character list from the on-disk index, only parsing PNG files
+            // whose fingerprint changed. Falls back to full parsing for cache misses.
+            const data = await processCharacterList(pngFiles, request.user.directories, request.user.profile.handle);
+            return response.send(data);
+        }
+        const processingPromises = pngFiles.map(file => processCharacter(file, request.user.directories, { shallow: false }));
         const data = (await Promise.all(processingPromises)).filter(c => c.name);
         return response.send(data);
     } catch (err) {
@@ -1632,6 +1750,14 @@ router.post('/duplicate', validateAvatarUrlMiddleware, async function (request, 
 
         fs.copyFileSync(filename, newFilename);
         console.info(`${filename} was copied to ${newFilename}`);
+
+        // The duplicated card has a fresh mtime, so the index will treat it as a miss and parse it
+        // on the next /all. Mark dirty to ensure the dirty flag is flushed even if no other mutation
+        // follows, so prune() can't race the new entry on a crash.
+        if (useShallowCharacters) {
+            characterIndex.markDirty(request.user.profile.handle);
+            characterIndex.flushSync();
+        }
         response.send({ path: path.parse(newFilename).base });
     } catch (error) {
         console.error(error);

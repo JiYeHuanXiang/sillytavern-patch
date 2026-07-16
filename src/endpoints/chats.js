@@ -526,7 +526,9 @@ router.post('/get', validateAvatarUrlMiddleware, function (request, response) {
 
         //if no chat dir for the character is found, make one with the character name
         if (!chatDirExists) {
-            fs.mkdirSync(directoryPath);
+            // recursive: character avatars may live in subdirectories (subfolder-as-character-card),
+            // so dirName can contain path separators (e.g. "folder/char"), requiring intermediate dirs.
+            fs.mkdirSync(directoryPath, { recursive: true });
             return response.send({});
         }
 

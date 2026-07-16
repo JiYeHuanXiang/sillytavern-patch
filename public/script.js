@@ -1035,29 +1035,31 @@ export async function printCharacters(fullRefresh = false) {
         showNavigator: true,
         callback: async function (/** @type {Entity[]} */ data) {
             $(listId).empty();
+            const fragment = document.createDocumentFragment();
             if (power_user.bogus_folders && isBogusFolderOpen()) {
-                $(listId).append(getBackBlock());
+                fragment.appendChild(getBackBlock()[0]);
             }
             if (!data.length) {
                 const emptyBlock = await getEmptyBlock();
-                $(listId).append(emptyBlock);
+                fragment.appendChild(emptyBlock[0]);
             }
             let displayCount = 0;
             for (const i of data) {
                 switch (i.type) {
                     case 'character':
-                        $(listId).append(getCharacterBlock(i.item, i.id));
+                        fragment.appendChild(getCharacterBlock(i.item, i.id)[0]);
                         displayCount++;
                         break;
                     case 'group':
-                        $(listId).append(getGroupBlock(i.item));
+                        fragment.appendChild(getGroupBlock(i.item)[0]);
                         displayCount++;
                         break;
                     case 'tag':
-                        $(listId).append(getTagBlock(i.item, i.entities, i.hidden, i.isUseless));
+                        fragment.appendChild(getTagBlock(i.item, i.entities, i.hidden, i.isUseless)[0]);
                         break;
                 }
             }
+            $(listId).append(fragment);
 
             const hidden = (characters.length + groups.length) - displayCount;
             if (hidden > 0 && entitiesFilter.hasAnyFilter()) {
@@ -10949,9 +10951,13 @@ async function removeCharacterFromUI() {
     resetChatState();
     $(document.getElementById('rm_button_selected_ch')).children('h2').text('');
     restoreNeutralChat();
-    // The characters array was already updated incrementally by the caller;
-    // only refresh the rendered list instead of a full server reload.
-    await printCharacters();
+    // Reload the full character list from the server. The earlier incremental path
+    // (characters.splice + printCharacters(false)) skipped syncSubfolderTags() and the
+    // page-number reset, which left subdirectory-tag membership out of sync with the
+    // spliced array; filterByTagState then filtered everything out and the list went
+    // blank until a manual page refresh. getCharacters() rebuilds the array, re-syncs
+    // subfolder tags, and calls printCharacters(true) — fast thanks to the backend index.
+    await getCharacters();
     await printMessages();
     saveSettingsDebounced();
     await eventSource.emit(event_types.CHAT_CHANGED, getCurrentChatId());
