@@ -35,6 +35,40 @@ const isAndroid = process.platform === 'android';
 // Use shallow character data for the character list
 const useShallowCharacters = !!getConfigValue('performance.lazyLoadCharacters', false, 'boolean');
 const useDiskCache = !!getConfigValue('performance.useDiskCache', true, 'boolean');
+// Concurrency for the character-list stat scan. Android/Termux defaults to a small value to avoid
+// stressing slow FUSE/sdcardfs I/O; desktop defaults higher. Set to 1 to force serial (still async,
+// so it won't block the event loop, only slower). 0 is treated as serial too.
+const characterListConcurrency = getConfigValue('performance.characterListConcurrency', isAndroid ? 8 : 32, 'number');
+
+/**
+ * Runs an async mapper over `items` with at most `limit` in-flight calls. Preserves input order in
+ * the output array. `limit <= 1` runs serially (await one by one), which still yields to the event
+ * loop between iterations — unlike a plain `for` of sync calls.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit Max in-flight calls
+ * @param {(item: T, index: number) => Promise<R>} fn
+ * @returns {Promise<(R)[]>}
+ */
+async function mapWithConcurrency(items, limit, fn) {
+    const results = new Array(items.length);
+    if (!limit || limit <= 1) {
+        for (let i = 0; i < items.length; i++) {
+            results[i] = await fn(items[i], i);
+        }
+        return results;
+    }
+    let cursor = 0;
+    async function worker() {
+        while (cursor < items.length) {
+            const i = cursor++;
+            results[i] = await fn(items[i], i);
+        }
+    }
+    const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+    await Promise.all(workers);
+    return results;
+}
 
 class DiskCache {
     /**
@@ -370,24 +404,6 @@ const calculateChatSize = (charDir) => {
     return { chatSize, dateLastChat };
 };
 
-/**
- * Returns the mtime of a character's chat directory (0 if it doesn't exist). Used as an incremental
- * fingerprint for the chat stats cache: when it is unchanged, the cached chat_size / date_last_chat
- * can be reused; when it changes, we recompute. (Appending a message does not change dir mtime, but
- * this cost is absorbed lazily whenever the chat dir is otherwise touched — see usage in
- * processCharacterList, which always recomputes stats for index-miss entries.)
- * @param {string} charDir The chat directory path
- * @returns {number}
- */
-const getChatDirMtime = (charDir) => {
-    try {
-        const stat = fs.statSync(charDir);
-        return stat.mtimeMs;
-    } catch {
-        return 0;
-    }
-};
-
 // Calculate the total string length of the data object
 const calculateDataSize = (data) => {
     return typeof data === 'object' ? Object.values(data).reduce((acc, val) => acc + String(val).length, 0) : 0;
@@ -490,21 +506,30 @@ const processCharacter = async (item, directories, { shallow, charStat }) => {
  * @returns {Promise<object[]>} List of shallow character objects (filtered to those with a name)
  */
 const processCharacterList = async (pngFiles, directories, handle) => {
-    const result = [];
     const validRelPaths = new Set(pngFiles);
 
-    for (const item of pngFiles) {
+    // Stat the png + its chat dir concurrently (async, so the event loop is not blocked). On a cache
+    // hit (the common case once the index is warm) we never touch the png contents, so this scan is
+    // the whole cost and concurrency helps a lot with thousands of files. On low-end/Termux the
+    // caller's characterListConcurrency keeps the in-flight count small to avoid IO thrash.
+    const list = await mapWithConcurrency(pngFiles, characterListConcurrency, async (item) => {
         const imgPath = path.join(directories.characters, item);
         let stat;
         try {
-            stat = fs.statSync(imgPath);
+            stat = await fsPromises.stat(imgPath);
         } catch {
             // File vanished between listing and stat (race); skip.
-            continue;
+            return null;
         }
         const pngStat = { mtimeMs: stat.mtimeMs, size: stat.size, ctimeMs: stat.ctimeMs };
         const chatsDirectory = path.join(directories.chats, item.replace('.png', ''));
-        const chatDirMtime = getChatDirMtime(chatsDirectory);
+
+        let chatDirMtime;
+        try {
+            chatDirMtime = (await fsPromises.stat(chatsDirectory)).mtimeMs;
+        } catch {
+            chatDirMtime = 0;
+        }
 
         const cached = characterIndex.get(handle, item, pngStat);
         if (cached) {
@@ -518,21 +543,22 @@ const processCharacterList = async (pngFiles, directories, handle) => {
                 // Persist the refreshed fingerprint + stats without re-parsing the card.
                 characterIndex.set(handle, item, pngStat, chatDirMtime, shallow);
             }
-            result.push(shallow);
-            continue;
+            return shallow;
         }
 
-        // Cache miss: parse the full card and cache its shallow form.
+        // Cache miss: parse the full card and cache its shallow form. charStat is reused so
+        // processCharacter doesn't stat the png a second time.
         const character = await processCharacter(item, directories, { shallow: true, charStat: stat });
         if (character?.name) {
             characterIndex.set(handle, item, pngStat, chatDirMtime, character);
-            result.push(character);
+            return character;
         }
-    }
+        return null;
+    });
 
     // Drop index entries for files that no longer exist on disk.
     characterIndex.prune(handle, validRelPaths);
-    return result;
+    return list.filter(Boolean);
 };
 
 /**
