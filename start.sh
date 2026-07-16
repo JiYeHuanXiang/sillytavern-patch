@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 if ! command -v npm &> /dev/null
 then
-    echo -e "\033[0;31mnpm could not be found in PATH. If the startup fails, please install Node.js from https://nodejs.org/\033[0m"
+    echo -e "[0;31mnpm could not be found in PATH. If the startup fails, please install Node.js from https://nodejs.org/[0m"
 fi
 
 echo "Installing Node Modules..."
