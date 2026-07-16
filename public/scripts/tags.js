@@ -547,8 +547,12 @@ function getTagBlock(tag, entities, hidden = 0, isUseless = false) {
     template.find('.bogus_folder_icon').addClass(tagFolder.fa_icon);
     if (isUseless) template.addClass('useless');
 
-    // Fill inline character images
-    buildAvatarList(template.find('.bogus_folder_avatars_block'), entities);
+    // Fill inline character images.
+    // PERF: only render a small preview slice of avatars. The full member list is never visible inside a collapsed
+    // folder block (members are shown when the folder is opened, via the normal character list), so cloning DOM nodes
+    // for every member of a large folder (some hold hundreds of cards) is pure overhead at list-render time.
+    const FOLDER_PREVIEW_LIMIT = 8;
+    buildAvatarList(template.find('.bogus_folder_avatars_block'), entities.slice(0, FOLDER_PREVIEW_LIMIT));
 
     return template;
 }

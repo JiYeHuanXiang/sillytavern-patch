@@ -1153,7 +1153,41 @@ export function tagToEntity(tag) {
  * @param {boolean} [param0.doSort] - Whether the entity list should be sorted when returned
  * @returns {Entity[]} All entities
  */
+// PERF (subfolder-folders optimization): in-memory result cache for getEntitiesList.
+// printCharacters runs on every page/scroll/filter change and used to fully recompute the entity list (including the
+// expensive per-folder sub-list loop) each time, even when nothing that affects the result had changed. We cache the
+// computed entities keyed by a fingerprint of every input that can change the output; callers get an O(1) hit on
+// repeated identical states (e.g. entering a folder then paging inside it). The cache is process-local and never
+// persisted to disk. If any input changes (characters/tags/tag_map/filters/sort/bogus_folders/groups) the fingerprint
+// changes and the next call recomputes — no manual invalidation needed.
+let _entitiesCacheKey = '';
+let _entitiesCacheValue = null;
+function _entitiesCacheFingerprint({ doFilter, doSort }) {
+    const fd = entitiesFilter.getFilterData(FILTER_TYPES.TAG) || {};
+    const selected = (fd.selected || []).join(',');
+    const excluded = (fd.excluded || []).join(',');
+    const folderState = entitiesFilter.getFilterData(FILTER_TYPES.FOLDER);
+    const favState = entitiesFilter.getFilterData(FILTER_TYPES.FAV);
+    const groupState = entitiesFilter.getFilterData(FILTER_TYPES.GROUP);
+    const search = entitiesFilter.getFilterData(FILTER_TYPES.SEARCH) || '';
+    // tag_map and tags drive membership + folder identity; include both in the fingerprint so that
+    // syncSubfolderTags (which mutates them in place) naturally invalidates the cache.
+    const tagMapFp = JSON.stringify(tag_map);
+    const tagsFp = tags.map(t => `${t.id}:${t.name}:${t.folder_type ?? ''}`).join('|');
+    const bogus = power_user.bogus_folders ? '1' : '0';
+    const groupIds = groups.map(g => g.id).join(',');
+    const charFp = characters.length + ':' + (characters[0]?.avatar || '') + ':' + (characters[characters.length - 1]?.avatar || '');
+    const sortFp = `${power_user.sort_field}:${power_user.sort_order}`;
+    return [doFilter ? '1' : '0', doSort ? '1' : '0', selected, excluded, folderState, favState, groupState, search,
+        tagMapFp, tagsFp, bogus, groupIds, charFp, sortFp].join('||');
+}
 export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
+    // Cache check: return the previous result verbatim when the fingerprint is unchanged.
+    const key = _entitiesCacheFingerprint({ doFilter, doSort });
+    if (key === _entitiesCacheKey && _entitiesCacheValue) {
+        return _entitiesCacheValue;
+    }
+
     let entities = [
         ...characters.map((item, index) => characterToEntity(item, index)),
         ...groups.map(item => groupToEntity(item)),
@@ -1173,19 +1207,44 @@ export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
         entities = filterByTagState(entities);
     }
 
-    // Run over all entities between first and second filter to save some states
+    // Run over all entities between first and second filter to save some states.
+    //
+    // PERF (subfolder-folders optimization): The original code computed a full sub-list for EVERY folder tag by
+    // running filterByTagState twice over the entire entities list + applyFilters + sort. With many auto-created
+    // subdirectory folders (e.g. 30+) that is O(folders × entities × passes) per printCharacters call and dominates
+    // list-rendering time. We avoid the redundant full passes:
+    //   - membership is already known via entitiesFilter.isElementTagged (an O(1) tag_map lookup);
+    //   - sorting is only needed for folders that will actually expand (selected in the drilldown). Closed/unselected
+    //     folders only need a count + a small preview slice, so we skip their sort.
+    // The produced entity.entities / entity.hidden / entity.isUseless values keep the same shape the downstream
+    // consumers (getTagBlock, filterByTagState's emptiness check) already expect.
+    const selectedFolderIds = new Set((entitiesFilter.getFilterData(FILTER_TYPES.TAG)?.selected ?? []));
+    const excludedTagIds = new Set((entitiesFilter.getFilterData(FILTER_TYPES.TAG)?.excluded ?? []));
     for (const entity of entities) {
         // For folders, we remember the sub entities so they can be displayed later, even if they might be filtered
-        // Those sub entities should be filtered and have the search filters applied too
         if (entity.type === 'tag') {
-            let subEntities = filterByTagState(entities, { subForEntity: entity, filterHidden: false });
+            // Cheap single-pass membership collection (replaces two full filterByTagState passes).
+            // filterHidden:false equivalent: include every non-tag entity tagged with this folder.
+            let subEntities = entities.filter(sub => sub.type !== 'tag' && entitiesFilter.isElementTagged(sub, entity.id));
             const subCount = subEntities.length;
-            subEntities = filterByTagState(entities, { subForEntity: entity });
-            if (doFilter) {
-                // sub entities filter "hacked" because folder filter should not be applied there, so even in "only folders" mode characters show up
+
+            // filterHidden:true equivalent: drop members that are hidden by a *different* closed folder that isn't open.
+            if (subCount > 0) {
+                const closedFolderIds = entities
+                    .filter(x => x.type === 'tag' && TAG_FOLDER_TYPES[x.item.folder_type] === TAG_FOLDER_TYPES.CLOSED)
+                    .map(x => x.id);
+                subEntities = subEntities.filter(sub => {
+                    if (TAG_FOLDER_TYPES[entity.item.folder_type] === TAG_FOLDER_TYPES.CLOSED) return true; // showing this closed folder's own members
+                    return !closedFolderIds.some(fid => fid !== entity.id && entitiesFilter.isElementTagged(sub, fid) && !selectedFolderIds.has(fid));
+                });
+            }
+
+            // applyFilters (folder-filter override) only matters when a global filter is active; skip when unselected.
+            if (doFilter && (selectedFolderIds.has(entity.id) || excludedTagIds.has(entity.id) || entitiesFilter.hasAnyFilter())) {
                 subEntities = entitiesFilter.applyFilters(subEntities, { clearScoreCache: false, tempOverrides: { [FILTER_TYPES.FOLDER]: FILTER_STATES.UNDEFINED }, clearFuzzySearchCaches: false });
             }
-            if (doSort) {
+            // Sorting is only observable for folders that expand (are selected in the drilldown). Skip for the rest.
+            if (doSort && selectedFolderIds.has(entity.id)) {
                 sortEntitiesList(subEntities, false);
             }
             entity.entities = subEntities;
@@ -1217,6 +1276,9 @@ export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
         sortEntitiesList(entities, false);
     }
     entitiesFilter.clearFuzzySearchCaches();
+    // Persist in cache for subsequent identical-state calls.
+    _entitiesCacheKey = key;
+    _entitiesCacheValue = entities;
     return entities;
 }
 
