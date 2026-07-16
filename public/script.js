@@ -192,6 +192,8 @@ import { COMMENT_NAME_DEFAULT, CONNECT_API_MAP, executeSlashCommandsOnChatInput,
 import { initMacroAutoComplete } from './scripts/autocomplete/MacroAutoComplete.js';
 import {
     tag_map,
+    TAG_FOLDER_TYPES,
+    TAG_FOLDER_DEFAULT_TYPE,
     tags,
     filterByTagState,
     isBogusFolder,
@@ -1153,41 +1155,7 @@ export function tagToEntity(tag) {
  * @param {boolean} [param0.doSort] - Whether the entity list should be sorted when returned
  * @returns {Entity[]} All entities
  */
-// PERF (subfolder-folders optimization): in-memory result cache for getEntitiesList.
-// printCharacters runs on every page/scroll/filter change and used to fully recompute the entity list (including the
-// expensive per-folder sub-list loop) each time, even when nothing that affects the result had changed. We cache the
-// computed entities keyed by a fingerprint of every input that can change the output; callers get an O(1) hit on
-// repeated identical states (e.g. entering a folder then paging inside it). The cache is process-local and never
-// persisted to disk. If any input changes (characters/tags/tag_map/filters/sort/bogus_folders/groups) the fingerprint
-// changes and the next call recomputes — no manual invalidation needed.
-let _entitiesCacheKey = '';
-let _entitiesCacheValue = null;
-function _entitiesCacheFingerprint({ doFilter, doSort }) {
-    const fd = entitiesFilter.getFilterData(FILTER_TYPES.TAG) || {};
-    const selected = (fd.selected || []).join(',');
-    const excluded = (fd.excluded || []).join(',');
-    const folderState = entitiesFilter.getFilterData(FILTER_TYPES.FOLDER);
-    const favState = entitiesFilter.getFilterData(FILTER_TYPES.FAV);
-    const groupState = entitiesFilter.getFilterData(FILTER_TYPES.GROUP);
-    const search = entitiesFilter.getFilterData(FILTER_TYPES.SEARCH) || '';
-    // tag_map and tags drive membership + folder identity; include both in the fingerprint so that
-    // syncSubfolderTags (which mutates them in place) naturally invalidates the cache.
-    const tagMapFp = JSON.stringify(tag_map);
-    const tagsFp = tags.map(t => `${t.id}:${t.name}:${t.folder_type ?? ''}`).join('|');
-    const bogus = power_user.bogus_folders ? '1' : '0';
-    const groupIds = groups.map(g => g.id).join(',');
-    const charFp = characters.length + ':' + (characters[0]?.avatar || '') + ':' + (characters[characters.length - 1]?.avatar || '');
-    const sortFp = `${power_user.sort_field}:${power_user.sort_order}`;
-    return [doFilter ? '1' : '0', doSort ? '1' : '0', selected, excluded, folderState, favState, groupState, search,
-        tagMapFp, tagsFp, bogus, groupIds, charFp, sortFp].join('||');
-}
 export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
-    // Cache check: return the previous result verbatim when the fingerprint is unchanged.
-    const key = _entitiesCacheFingerprint({ doFilter, doSort });
-    if (key === _entitiesCacheKey && _entitiesCacheValue) {
-        return _entitiesCacheValue;
-    }
-
     let entities = [
         ...characters.map((item, index) => characterToEntity(item, index)),
         ...groups.map(item => groupToEntity(item)),
@@ -1276,9 +1244,6 @@ export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
         sortEntitiesList(entities, false);
     }
     entitiesFilter.clearFuzzySearchCaches();
-    // Persist in cache for subsequent identical-state calls.
-    _entitiesCacheKey = key;
-    _entitiesCacheValue = entities;
     return entities;
 }
 
