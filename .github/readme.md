@@ -54,9 +54,9 @@ UpdateAndStart.bat
 ```
 ST/
 ├── public/          # 前端静态资源
-│   └── characters/  # 角色卡目录（支持子目录）
 ├── src/             # 后端源码
 ├── data/            # 用户数据目录
+│    └── default-user/characters/  # 角色卡目录（支持子目录）
 ├── config.yaml      # 服务配置
 ├── server.js        # 入口文件
 └── package.json
