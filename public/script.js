@@ -222,7 +222,6 @@ import { markdownExclusionExt } from './scripts/showdown-exclusion.js';
 import { markdownUnderscoreExt } from './scripts/showdown-underscore.js';
 import { NOTE_MODULE_NAME, initAuthorsNote, metadata_keys, setFloatingPrompt, shouldWIAddPrompt } from './scripts/authors-note.js';
 import { registerPromptManagerMigration } from './scripts/PromptManager.js';
-import { getRegexedString, regex_placement } from './scripts/extensions/regex/engine.js';
 import { initLogprobs, saveLogprobsForActiveMessage } from './scripts/logprobs.js';
 import { FILTER_STATES, FILTER_TYPES, FilterHelper, isFilterState } from './scripts/filters.js';
 import { getCfgPrompt, getGuidanceScale, initCfg } from './scripts/cfg-scale.js';
@@ -895,7 +894,6 @@ export async function selectCharacterById(id, { switchMenu = true } = {}) {
             setCharacterName('');
             resetSelectedGroup();
             await clearChat({ clearData: true });
-            cancelTtsPlay();
             this_edit_mes_id = undefined;
             selected_button = 'character_edit';
             setCharacterId(id);
@@ -1852,37 +1850,6 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
     const replacedPromptBias = power_user.user_prompt_bias && substituteParams(power_user.user_prompt_bias);
     if (!power_user.show_user_prompt_bias && ch_name && !isUser && !isSystem && replacedPromptBias && mes.startsWith(replacedPromptBias)) {
         mes = mes.slice(replacedPromptBias.length);
-    }
-
-    if (!isSystem) {
-        function getRegexPlacement() {
-            try {
-                if (isReasoning) {
-                    return regex_placement.REASONING;
-                }
-                if (isUser) {
-                    return regex_placement.USER_INPUT;
-                } else if (chat[messageId]?.extra?.type === 'narrator') {
-                    return regex_placement.SLASH_COMMAND;
-                } else {
-                    return regex_placement.AI_OUTPUT;
-                }
-            } catch {
-                return regex_placement.AI_OUTPUT;
-            }
-        }
-
-        const regexPlacement = getRegexPlacement();
-        const usableMessages = chat.map((x, index) => ({ message: x, index: index })).filter(x => !x.message.is_system);
-        const indexOf = usableMessages.findIndex(x => x.index === Number(messageId));
-        const depth = messageId >= 0 && indexOf !== -1 ? (usableMessages.length - indexOf - 1) : undefined;
-
-        // Always override the character name
-        mes = getRegexedString(mes, regexPlacement, {
-            characterOverride: ch_name,
-            isMarkdown: true,
-            depth: depth,
-        });
     }
 
     if (power_user.auto_fix_generated_markdown) {
@@ -4512,12 +4479,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
     }
 
     coreChat = await Promise.all(coreChat.map(async (/** @type {ChatMessage} */ chatItem, index) => {
-        let message = chatItem.mes;
-        let regexType = chatItem.is_user ? regex_placement.USER_INPUT : regex_placement.AI_OUTPUT;
-        let options = { isPrompt: true, depth: (coreChat.length - index - (isContinue ? 2 : 1)) };
-
-        let regexedMessage = getRegexedString(message, regexType, options);
-        regexedMessage = await appendFileContent(chatItem, regexedMessage);
+        let regexedMessage = await appendFileContent(chatItem, chatItem.mes);
 
         const titles = [];
         if (chatItem?.extra?.append_title && chatItem?.extra?.title) {
@@ -4555,11 +4517,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
                 ? coreChat[i].mes
                 : promptReasoning.addToMessage(
                     coreChat[i].mes,
-                    getRegexedString(
-                        String(coreChat[i].extra?.reasoning ?? ''),
-                        regex_placement.REASONING,
-                        { isPrompt: true, depth: depth },
-                    ),
+                    String(coreChat[i].extra?.reasoning ?? ''),
                     isPrefix,
                     coreChat[i].extra?.reasoning_duration,
                 ),
@@ -5513,7 +5471,6 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         });
 
 
-        reasoning = getRegexedString(reasoning, regex_placement.REASONING);
 
         if (power_user.trim_spaces) {
             reasoning = reasoning.trim();
@@ -5885,8 +5842,6 @@ export function removeMacros(str) {
  * @returns {Promise<any>} A promise that resolves to the message when it is inserted.
  */
 export async function sendMessageAsUser(messageText, messageBias, insertAt = null, compact = false, name = name1, avatar = user_avatar) {
-    messageText = getRegexedString(messageText, regex_placement.USER_INPUT);
-
     const message = {
         name: name,
         is_user: true,
@@ -6491,8 +6446,6 @@ export function cleanUpMessage({ getMessage, isImpersonate, isContinue, displayI
     }
 
     // Regex uses vars, so add before formatting
-    getMessage = getRegexedString(getMessage, isImpersonate ? regex_placement.USER_INPUT : regex_placement.AI_OUTPUT);
-
     if (power_user.collapse_newlines) {
         getMessage = collapseNewlines(getMessage);
     }
@@ -7734,12 +7687,12 @@ function getFirstMessage() {
         is_user: false,
         is_system: false,
         send_date: getMessageTimeStamp(),
-        mes: getRegexedString(firstMes, regex_placement.AI_OUTPUT),
+        mes: firstMes,
         extra: {},
     };
 
     if (Array.isArray(alternateGreetings) && alternateGreetings.length > 0) {
-        const swipes = [message.mes, ...(alternateGreetings.map(greeting => getRegexedString(greeting, regex_placement.AI_OUTPUT)))];
+        const swipes = [message.mes, ...alternateGreetings];
 
         if (!message.mes) {
             swipes.shift();
@@ -8170,25 +8123,7 @@ function updateMessage(div) {
     // editing old messages
     mes.extra ??= {};
 
-    let regexPlacement;
-    if (mes?.is_user) {
-        regexPlacement = regex_placement.USER_INPUT;
-    } else if (mes.extra?.type === 'narrator') {
-        regexPlacement = regex_placement.SLASH_COMMAND;
-    } else {
-        regexPlacement = regex_placement.AI_OUTPUT;
-    }
-
     // Ignore character override if sent as system
-    text = getRegexedString(
-        text,
-        regexPlacement,
-        {
-            characterOverride: mes.extra?.type === 'narrator' ? undefined : mes.name,
-            isEdit: true,
-        },
-    );
-
 
     if (power_user.trim_spaces) {
         text = text.trim();
@@ -9558,12 +9493,6 @@ export function setGenerationProgress(progress) {
             'background': `linear-gradient(90deg, #008000d6 ${progress}%, transparent ${progress}%)`,
             'transition': '0.25s ease-in-out',
         });
-    }
-}
-
-export function cancelTtsPlay() {
-    if ('speechSynthesis' in window) {
-        speechSynthesis.cancel();
     }
 }
 
@@ -12509,7 +12438,6 @@ jQuery(async function () {
     });
 
     $(window).on('beforeunload', () => {
-        cancelTtsPlay();
         if (streamingProcessor) {
             console.log('Page reloaded. Aborting streaming...');
             streamingProcessor.onStopStreaming();

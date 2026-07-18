@@ -28,7 +28,6 @@ import {
     unshallowCharacter,
     updateRemoteChatName,
 } from '../script.js';
-import { getRegexedString, regex_placement } from './extensions/regex/engine.js';
 import { deleteGroupChatByName, getGroupAvatar, groups, is_group_generating, openGroupById, openGroupChat } from './group-chats.js';
 import { t } from './i18n.js';
 import { callGenericPopup, POPUP_TYPE } from './popup.js';
@@ -274,7 +273,7 @@ function getAssistantGreeting(character) {
         return defaultGreeting;
     }
 
-    return getRegexedString(character.first_mes || '', regex_placement.AI_OUTPUT, { depth: 0 }) || defaultGreeting;
+    return character.first_mes || defaultGreeting;
 }
 
 function sendAssistantMessage() {

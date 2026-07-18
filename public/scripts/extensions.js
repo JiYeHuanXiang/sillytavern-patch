@@ -151,9 +151,6 @@ export const extension_settings = {
         chara: [],
         wiAddition: [],
     },
-    caption: {
-        refine_mode: false,
-    },
     expressions: {
         /** @type {number} see `EXPRESSION_API` */
         api: undefined,
@@ -175,22 +172,7 @@ export const extension_settings = {
         profiles: [],
     },
     dice: {},
-    /** @type {import('./char-data.js').RegexScriptData[]} */
-    regex: [],
-    /** @type {import('./extensions/regex/index.js').RegexPreset[]} */
-    regex_presets: [],
-    /** @type {string[]} */
-    character_allowed_regex: [],
-    /** @type {Record<string, string[]>} */
-    preset_allowed_regex: {},
-    tts: {},
-    sd: {
-        prompts: {},
-        character_prompts: {},
-        character_negative_prompts: {},
-    },
     chromadb: {},
-    translate: {},
     objective: {},
     quickReply: {},
     randomizer: {
@@ -217,12 +199,6 @@ export const extension_settings = {
      * @type {string[]}
      */
     disabled_attachments: [],
-    gallery: {
-        /** @type {{[characterKey: string]: string}} */
-        folders: {},
-        /** @type {string} */
-        sort: 'dateAsc',
-    },
 };
 
 function showHideExtensionsMenu() {
@@ -714,7 +690,7 @@ async function addExtensionsButtonAndMenu() {
     $('html').on('click', function (e) {
         if (!isDropdownVisible) return;
         const clickTarget = $(e.target);
-        const noCloseTargets = ['#sd_gen', '#extensionsMenuButton', '#roll_dice'];
+        const noCloseTargets = ['#extensionsMenuButton', '#roll_dice'];
         if (!noCloseTargets.some(id => clickTarget.closest(id).length > 0)) {
             dropdown.fadeOut(animation_duration);
             isDropdownVisible = false;

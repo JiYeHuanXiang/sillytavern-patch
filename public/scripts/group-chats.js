@@ -55,7 +55,6 @@ import {
     setMenuType,
     menu_type,
     select_selected_character,
-    cancelTtsPlay,
     displayPastChats,
     sendMessageAsUser,
     getBiasStrings,
@@ -2034,7 +2033,6 @@ export async function openGroupById(groupId) {
             setCharacterName('');
             resetSelectedGroup();
             await clearChat({ clearData: true });
-            cancelTtsPlay();
             selected_group = groupId;
             setEditedMessageId(undefined);
             updateChatMetadata({}, true);

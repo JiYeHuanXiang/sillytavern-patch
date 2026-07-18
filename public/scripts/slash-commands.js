@@ -68,7 +68,6 @@ import { SlashCommandParserError } from './slash-commands/SlashCommandParserErro
 import { getMessageTimeStamp, isMobile } from './RossAscends-mods.js';
 import { hideChatMessageRange } from './chats.js';
 import { getContext, saveMetadataDebounced } from './extensions.js';
-import { getRegexedString, regex_placement } from './extensions/regex/engine.js';
 import { findGroupMemberId, groups, is_group_generating, openGroupById, regenerateGroup, resetSelectedGroup, saveGroupChat, selected_group, getGroupMembers } from './group-chats.js';
 import { chat_completion_sources, MINIMAX_ENDPOINT, oai_settings, promptManager, SILICONFLOW_ENDPOINT, ZAI_ENDPOINT } from './openai.js';
 import { user_avatar } from './personas.js';
@@ -4712,7 +4711,7 @@ async function askCharacter(args, text) {
     const chId = getCharIndex(character);
 
     if (text) {
-        const mesText = getRegexedString(text.trim(), regex_placement.SLASH_COMMAND);
+        const mesText = text.trim();
         // Sending a message implicitly saves the chat, so this needs to be done before changing the character
         // Otherwise, a corruption will occur
         await sendMessageAsUser(mesText, '');
@@ -5713,7 +5712,7 @@ export async function generateSystemMessage(args, prompt) {
     const message = await generateQuietPrompt({ quietPrompt: prompt, trimToSentence: trim });
     toastr.clear(toast);
 
-    return await sendNarratorMessage(args, getRegexedString(message, regex_placement.SLASH_COMMAND));
+    return await sendNarratorMessage(args, message);
 }
 
 function setStoryModeCallback() {
@@ -5939,9 +5938,6 @@ export async function sendMessageAs(args, text) {
 
     let mesText = String(text ?? '').trim();
 
-    // Requires a regex check after the slash command is pushed to output
-    mesText = getRegexedString(mesText, regex_placement.SLASH_COMMAND, { characterOverride: name });
-
     // Messages that do nothing but set bias will be hidden from the context
     const bias = extractMessageBias(mesText);
     const isSystem = bias && !removeMacros(mesText).length;
@@ -6083,7 +6079,7 @@ export async function promptQuietForLoudResponse(who, text) {
     //text = `${text}${power_user.instruct.enabled ? '' : '\n'}${(power_user.always_force_name2 && who != 'raw') ? characters[character_id].name + ":" : ""}`
 
     let reply = await generateQuietPrompt({ quietPrompt: text, quietToLoud: true });
-    text = await getRegexedString(reply, regex_placement.SLASH_COMMAND);
+    text = reply;
 
     const message = {
         name: characters[character_id].name,

@@ -2,7 +2,6 @@ import {
     moment,
 } from '../lib.js';
 import { chat, closeMessageEditor, event_types, eventSource, main_api, messageFormatting, saveChatConditional, saveChatDebounced, saveSettingsDebounced, substituteParams, syncMesToSwipe, updateMessageBlock } from '../script.js';
-import { getRegexedString, regex_placement } from './extensions/regex/engine.js';
 import { getCurrentLocale, t, translate } from './i18n.js';
 import { macros, MacroCategory } from './macros/macro-system.js';
 import { chat_completion_sources, getChatCompletionModel, oai_settings } from './openai.js';
@@ -406,7 +405,7 @@ export class ReasoningHandler {
         const extra = chat[messageId].extra;
 
         const reasoningChanged = extra.reasoning !== reasoning;
-        this.reasoning = getRegexedString(reasoning ?? '', regex_placement.REASONING);
+        this.reasoning = reasoning ?? '';
 
         this.type = (this.#isParsingReasoning || this.#parsingReasoningMesStartIndex) ? ReasoningType.Parsed : ReasoningType.Model;
 
@@ -947,14 +946,6 @@ function registerReasoningSlashCommands() {
         helpString: t`Extracts the reasoning block from a string using the Reasoning Formatting settings.`,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({
-                name: 'regex',
-                description: 'Whether to apply regex scripts to the reasoning content.',
-                typeList: [ARGUMENT_TYPE.BOOLEAN],
-                defaultValue: 'true',
-                isRequired: false,
-                enumList: commonEnumProviders.boolean('trueFalse')(),
-            }),
-            SlashCommandNamedArgument.fromProps({
                 name: 'return',
                 description: 'Whether to return the parsed reasoning or the content without reasoning',
                 typeList: [ARGUMENT_TYPE.STRING],
@@ -1004,10 +995,7 @@ function registerReasoningSlashCommands() {
                 return parsedReasoning.content;
             }
 
-            const applyRegex = !isFalseBoolean(String(args.regex ?? ''));
-            return applyRegex
-                ? getRegexedString(parsedReasoning.reasoning, regex_placement.REASONING)
-                : parsedReasoning.reasoning;
+            return parsedReasoning.reasoning;
         },
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -1185,7 +1173,7 @@ function setReasoningEventHandlers() {
      * @param {string} value Reasoning value
      */
     function updateReasoningFromValue(message, value) {
-        const reasoning = getRegexedString(value, regex_placement.REASONING, { isEdit: true });
+        const reasoning = value;
         message.extra.reasoning = reasoning;
         message.extra.reasoning_type = message.extra.reasoning_type ? ReasoningType.Edited : ReasoningType.Manual;
     }
@@ -1503,7 +1491,7 @@ export function parseReasoningInSwipes(swipes, swipeInfoArray, duration) {
     for (let index = 0; index < swipes.length; index++) {
         const parsedReasoning = parseReasoningFromString(swipes[index]);
         if (parsedReasoning) {
-            swipes[index] = getRegexedString(parsedReasoning.content, regex_placement.REASONING);
+            swipes[index] = parsedReasoning.content;
             swipeInfoArray[index].extra.reasoning = parsedReasoning.reasoning;
             swipeInfoArray[index].extra.reasoning_duration = duration;
             swipeInfoArray[index].extra.reasoning_type = ReasoningType.Parsed;
@@ -1552,7 +1540,7 @@ function registerReasoningAppEvents() {
 
         // If reasoning was found, add it to the message
         if (parsedReasoning.reasoning) {
-            message.extra.reasoning = getRegexedString(parsedReasoning.reasoning, regex_placement.REASONING);
+            message.extra.reasoning = parsedReasoning.reasoning;
             message.extra.reasoning_type = ReasoningType.Parsed;
         }
 
