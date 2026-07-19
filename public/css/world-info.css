@@ -326,3 +326,80 @@ select.keyselect+span.select2-container .select2-selection--multiple {
     overflow-y: auto;
     overflow-x: hidden;
 }
+
+/* ===== Mobile in-page searchable world info selector ===== */
+/* Replaces the OS-native <select> picker (which can't be filtered) with a
+   custom trigger + search input + scrollable option list, inside popups. */
+.mobile_world_search {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 5px;
+}
+
+.mobile_world_search_trigger {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+}
+
+.mobile_world_search_trigger::after {
+    content: '\f078'; /* fa-chevron-down */
+    font-family: 'Font Awesome 6 Free', 'Font Awesome 5 Free';
+    font-weight: 900;
+    font-size: 0.8em;
+    opacity: 0.6;
+    margin-left: auto;
+    transition: transform 0.2s ease;
+}
+
+.mobile_world_search_open .mobile_world_search_trigger::after {
+    transform: rotate(180deg);
+}
+
+.mobile_world_search_input {
+    display: none;
+    margin: 0;
+}
+
+.mobile_world_search_open .mobile_world_search_input {
+    display: block;
+}
+
+.mobile_world_search_list {
+    display: none;
+    flex-direction: column;
+    max-height: 40vh;
+    overflow-y: auto;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    background-color: var(--black30a);
+    padding: 2px;
+}
+
+.mobile_world_search_open .mobile_world_search_list {
+    display: flex;
+}
+
+.mobile_world_search_item {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    word-break: break-word;
+}
+
+.mobile_world_search_item.selected {
+    background-color: var(--crimson70a);
+}
+
+.mobile_world_search_item:active {
+    filter: brightness(1.2);
+}
+
+.mobile_world_search_item_empty {
+    opacity: 0.7;
+    font-style: italic;
+}

@@ -5824,9 +5824,13 @@ export function openWorldInfoEditor(worldName) {
 }
 
 /**
- * On mobile, native <select> cannot be filtered. This inserts a text input
- * above the given select and filters its options live. Designed to be called
- * inside a popup's onOpen (after options have been populated).
+ * On mobile, tapping a <select> brings up the OS-native picker which covers
+ * the whole screen and cannot be filtered. To allow keyword search we hide the
+ * native select behind a custom trigger and render an in-page, searchable list
+ * of options. Selecting an item updates the underlying select's value and fires
+ * its existing 'change' handlers, so the rest of the code is untouched.
+ *
+ * Designed to be called inside a popup's onOpen (after options are populated).
  *
  * @param {JQuery<HTMLElement>} select - The world info select element.
  */
@@ -5835,25 +5839,180 @@ export function installMobileWorldSearch(select) {
         return;
     }
 
+    // Already initialised: refresh the list from the current <option>s.
+    if (select[0].hasAttribute('data-mobile-search')) {
+        rebuildList();
+        return;
+    }
+
+    const el = select[0];
+    const isMultiple = el.hasAttribute('multiple');
+
+    // Hide the native control; we render our own interactive UI instead.
+    el.style.display = 'none';
+    el.setAttribute('data-mobile-search', 'true');
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mobile_world_search';
+
+    // Trigger chip that shows the current selection and opens the list.
+    const trigger = document.createElement('div');
+    trigger.className = 'mobile_world_search_trigger text_pole';
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('tabindex', '0');
+
+    // Search input.
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.placeholder = t`Search...`;
-    searchInput.classList.add('text_pole', 'wide100p', 'marginBot10px');
+    searchInput.className = 'text_pole wide100p mobile_world_search_input';
 
-    const allOptions = select.find('option').toArray();
+    // Scrollable option list.
+    const list = document.createElement('div');
+    list.className = 'mobile_world_search_list';
+    list.setAttribute('role', 'listbox');
 
+    wrapper.appendChild(trigger);
+    wrapper.appendChild(searchInput);
+    wrapper.appendChild(list);
+    select.after(wrapper);
+
+    function getOptions() {
+        return select.find('option').toArray();
+    }
+
+    function getOptionForItem(item) {
+        return getOptions().find(o => o.value === item.dataset.value);
+    }
+
+    function renderTrigger() {
+        const options = getOptions();
+        if (isMultiple) {
+            const selected = options.filter(o => o.selected && o.value !== '');
+            const none = options.find(o => o.value === '');
+            if (selected.length === 0) {
+                trigger.textContent = none ? none.textContent : t`--- None ---`;
+            } else {
+                trigger.textContent = `${t`Selected`}: ${selected.length}`;
+            }
+        } else {
+            const selected = options.find(o => o.selected) || options[0];
+            trigger.textContent = selected ? selected.textContent : t`--- None ---`;
+        }
+    }
+
+    function buildItem(option) {
+        const item = document.createElement('div');
+        item.className = 'mobile_world_search_item';
+        item.setAttribute('role', 'option');
+        item.dataset.value = option.value;
+        item.dataset.text = (option.textContent || '').toLowerCase();
+        item.textContent = option.textContent;
+        if (option.value === '') {
+            item.classList.add('mobile_world_search_item_empty');
+        }
+        if (option.selected) {
+            item.classList.add('selected');
+        }
+
+        item.addEventListener('click', () => {
+            const options = getOptions();
+            if (isMultiple) {
+                if (option.value === '') {
+                    // "None" clears all.
+                    const hadSelection = options.some(o => o.selected && o.value !== '');
+                    for (const o of options) {
+                        o.selected = false;
+                    }
+                    option.selected = !hadSelection;
+                } else {
+                    option.selected = !option.selected;
+                }
+            } else {
+                for (const o of options) {
+                    o.selected = false;
+                }
+                option.selected = true;
+            }
+
+            renderTrigger();
+            syncAllItems();
+            select.trigger('change');
+
+            // Single-select: collapse after picking. Multi-select stays open.
+            if (!isMultiple) {
+                setListOpen(false);
+            }
+        });
+        return item;
+    }
+
+    function syncAllItems() {
+        const options = getOptions();
+        for (const child of list.children) {
+            const option = options.find(o => o.value === child.dataset.value);
+            child.classList.toggle('selected', !!option?.selected);
+        }
+    }
+
+    function rebuildList() {
+        list.innerHTML = '';
+        for (const option of getOptions()) {
+            list.appendChild(buildItem(option));
+        }
+        // Re-apply the current search filter.
+        searchInput.dispatchEvent(new Event('input'));
+        renderTrigger();
+    }
+
+    // Initial build.
+    rebuildList();
+
+    // Live filter.
     searchInput.addEventListener('input', function () {
         const query = this.value.trim().toLowerCase();
-
-        // Hide/show options instead of removing them, so selected state is preserved
-        // and no spurious 'change' event is fired while filtering.
-        for (const option of allOptions) {
-            const text = option.textContent || '';
-            option.hidden = query && !text.toLowerCase().includes(query);
+        for (const item of list.children) {
+            item.hidden = query && !item.dataset.text.includes(query);
         }
     });
 
-    select.before(searchInput);
+    let listOpen = true;
+    wrapper.classList.add('mobile_world_search_open');
+    function setListOpen(open) {
+        listOpen = open;
+        wrapper.classList.toggle('mobile_world_search_open', open);
+    }
+
+    trigger.addEventListener('click', () => setListOpen(!listOpen));
+    trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setListOpen(!listOpen);
+        }
+    });
+
+    // Rebuild when the underlying <option>s are added/removed/replaced elsewhere.
+    // Compare snapshot version to avoid re-entrancy (rebuild itself touches `selected` only).
+    let lastSignature = optionsSignature();
+    function optionsSignature() {
+        return getOptions().map(o => `${o.value}:${o.textContent}`).join('|');
+    }
+    const observer = new MutationObserver(() => {
+        const sig = optionsSignature();
+        if (sig !== lastSignature) {
+            lastSignature = sig;
+            rebuildList();
+        }
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+
+    // Keep trigger/items in sync when the underlying select changes elsewhere.
+    select.on('change.mobileSearchSync', () => {
+        renderTrigger();
+        syncAllItems();
+    });
+
+    renderTrigger();
 }
 
 /**
@@ -6325,6 +6484,9 @@ export function initWorldInfo() {
                 console.warn('lets not reload an already loaded list yes?');
             }
         }, { buttonStyle: true, closeDrawer: true });
+    } else {
+        installMobileWorldSearch($('#world_editor_select'));
+        installMobileWorldSearch($('#world_info'));
     }
 
     $('#WorldInfo').on('scroll', () => {
