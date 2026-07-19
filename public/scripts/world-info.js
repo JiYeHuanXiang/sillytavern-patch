@@ -5824,6 +5824,39 @@ export function openWorldInfoEditor(worldName) {
 }
 
 /**
+ * On mobile, native <select> cannot be filtered. This inserts a text input
+ * above the given select and filters its options live. Designed to be called
+ * inside a popup's onOpen (after options have been populated).
+ *
+ * @param {JQuery<HTMLElement>} select - The world info select element.
+ */
+export function installMobileWorldSearch(select) {
+    if (!isMobile()) {
+        return;
+    }
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = t`Search...`;
+    searchInput.classList.add('text_pole', 'wide100p', 'marginBot10px');
+
+    const allOptions = select.find('option').toArray();
+
+    searchInput.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+
+        // Hide/show options instead of removing them, so selected state is preserved
+        // and no spurious 'change' event is fired while filtering.
+        for (const option of allOptions) {
+            const text = option.textContent || '';
+            option.hidden = query && !text.toLowerCase().includes(query);
+        }
+    });
+
+    select.before(searchInput);
+}
+
+/**
  * Assigns a lorebook to the current chat.
  * @param {Pick<JQuery.ClickEvent, 'shiftKey' | 'altKey'>} event Click event
  * @returns {Promise<void>}
@@ -5864,7 +5897,25 @@ export async function assignLorebookToChat({ shiftKey, altKey }) {
         saveMetadata();
     });
 
-    await callGenericPopup(template, POPUP_TYPE.TEXT);
+    const popup = new Popup(template, POPUP_TYPE.TEXT, '', {
+        onOpen: function (popup) {
+            const popupDialog = $(popup.dlg);
+
+            // Not needed on mobile.
+            if (!isMobile()) {
+                worldSelect.select2({
+                    width: '100%',
+                    placeholder: t`--- None ---`,
+                    allowClear: true,
+                    dropdownParent: popupDialog,
+                });
+            } else {
+                installMobileWorldSearch(worldSelect);
+            }
+        },
+    });
+
+    await popup.show();
 }
 
 /**

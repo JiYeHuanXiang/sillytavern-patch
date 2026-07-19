@@ -49,6 +49,7 @@ import {
     initWorldInfo,
     charUpdatePrimaryWorld,
     charSetAuxWorlds,
+    installMobileWorldSearch,
 } from './scripts/world-info.js';
 
 import {
@@ -9557,6 +9558,13 @@ async function openCharacterWorldPopup() {
 
             // Not needed on mobile.
             if (!isMobile()) {
+                primarySelect.select2({
+                    width: '100%',
+                    placeholder: t`--- None ---`,
+                    allowClear: true,
+                    dropdownParent: popupDialog,
+                });
+
                 extrasSelect.select2({
                     width: '100%',
                     placeholder: t`No auxiliary Lorebooks set. Click here to select.`,
@@ -9564,6 +9572,9 @@ async function openCharacterWorldPopup() {
                     closeOnSelect: false,
                     dropdownParent: popupDialog,
                 });
+            } else {
+                installMobileWorldSearch(primarySelect);
+                installMobileWorldSearch(extrasSelect);
             }
         },
     });

@@ -55,8 +55,9 @@ import { debounce_timeout } from './constants.js';
 import { FILTER_TYPES, FilterHelper } from './filters.js';
 import { groups, selected_group } from './group-chats.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
+import { isMobile } from './RossAscends-mods.js';
 import { t } from './i18n.js';
-import { openWorldInfoEditor, world_names } from './world-info.js';
+import { openWorldInfoEditor, world_names, installMobileWorldSearch } from './world-info.js';
 import { renderTemplateAsync } from './templates.js';
 import { saveMetadataDebounced } from './extensions.js';
 import { accountStorage } from './util/AccountStorage.js';
@@ -1310,7 +1311,25 @@ async function onPersonaLoreButtonClick({ shiftKey, altKey }) {
         }
     });
 
-    await callGenericPopup(template, POPUP_TYPE.TEXT);
+    const popup = new Popup(template, POPUP_TYPE.TEXT, '', {
+        onOpen: function (popup) {
+            const popupDialog = $(popup.dlg);
+
+            // Not needed on mobile.
+            if (!isMobile()) {
+                worldSelect.select2({
+                    width: '100%',
+                    placeholder: t`--- None ---`,
+                    allowClear: true,
+                    dropdownParent: popupDialog,
+                });
+            } else {
+                installMobileWorldSearch(worldSelect);
+            }
+        },
+    });
+
+    await popup.show();
 }
 
 async function onPersonaDescriptionPositionInput() {
