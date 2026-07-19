@@ -3,11 +3,10 @@
         "checkJs": true,
         "target": "ESNext",
         "module": "ESNext",
-        "moduleResolution": "node",
+        "moduleResolution": "Bundler",
         "allowUmdGlobalAccess": true,
         "allowSyntheticDefaultImports": true,
         "strictBindCallApply": true,
-        "baseUrl": ".",
         "paths": {
             "/*": [
                 "./*"
@@ -22,8 +21,5 @@
         "**/*.min.js",
         "scripts/extensions/quick-reply/lib/**",
         "scripts/extensions/tts/lib/**"
-    ],
-    "typeAcquisition": {
-        "include": []
-    }
+    ]
 }
