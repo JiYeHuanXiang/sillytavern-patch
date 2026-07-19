@@ -1,12 +1,19 @@
 # 更新日志
 
-本文件记录 sillytavern-custom 个人 fork 相对于上游 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的改动。
+本文件记录 sillytavern-patch 个人 fork 相对于上游 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的改动。
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.18.0-patch-1-pre.1] - 预览版 - 2025-07-17
+## [1.18.0-patch-1] - 2026-07-19
 
-首个预览版本。基于上游 SillyTavern `1.18.0` release 快照，针对国内模型使用场景做定制化改进。
+首个正式版本。基于上游 SillyTavern `1.18.0` release 快照，针对国内模型使用场景做定制化改进。
+
+相对于预览版 `1.18.0-patch-1-pre.1` 的主要变化：
+
+- 精简依赖与代码体积，移除未使用的扩展（caption、gallery、regex、stable-diffusion、translate、tts 等）及其对应后端端点与 video generation 代码。
+- 优化 PNG 角色卡元数据处理逻辑，修复角色列表空白状态问题。
+- 更新 README，明确模型支持范围与修改内容。
+- 调整 `jsconfig.json` 模块解析配置并清理。
 
 ### ✨ 新增
 
@@ -28,7 +35,3 @@
 ### 🔧 其他
 
 - 清理上游 CI 配置，更新 README 与项目配置，使其贴合个人 fork 定位。
-
-### ⚠️ 预览版说明
-
-本版本为首个预览版（pre-release），可能存在未发现问题。请勿用于生产环境，建议在使用前 备份 `data/` 与角色卡数据。
