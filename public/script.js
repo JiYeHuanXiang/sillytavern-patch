@@ -10881,11 +10881,12 @@ async function removeCharacterFromUI() {
     $(document.getElementById('rm_button_selected_ch')).children('h2').text('');
     restoreNeutralChat();
     // Reload the full character list from the server. The earlier incremental path
-    // (characters.splice + printCharacters(false)) skipped syncSubfolderTags() and the
-    // page-number reset, which left subdirectory-tag membership out of sync with the
-    // spliced array; filterByTagState then filtered everything out and the list went
-    // blank until a manual page refresh. getCharacters() rebuilds the array, re-syncs
-    // subfolder tags, and calls printCharacters(true) — fast thanks to the backend index.
+    // (characters.splice + printCharacters(true)) cannot work here: resetChatState()
+    // above runs `characters.length = 0`, which wipes the splice result before
+    // printCharacters renders — leaving the list blank until a manual page refresh.
+    // getCharacters() rebuilds the array from /api/characters/all (served from the
+    // on-disk index when lazyLoadCharacters is on), re-syncs subfolder tags, and
+    // calls printCharacters(true). getGroups() is invoked internally as well.
     await getCharacters();
     await printMessages();
     saveSettingsDebounced();

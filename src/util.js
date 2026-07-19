@@ -1650,3 +1650,120 @@ export function invalidateFirefoxCache(file, request, response) {
         response.setHeader('Cache-Control', 'must-understand, no-store');
     }
 }
+
+/**
+ * In-memory cache for the results of findPngFilesRecursiveAsync, keyed by
+ * directory path. Invalidation is based on the top-level directory mtime:
+ * when the directory's mtime changes (files added/removed/renamed), the cache
+ * entry is stale and a fresh scan is performed.
+ *
+ * On a server with thousands of character cards in nested subdirectories,
+ * this avoids re-scanning the entire tree on every /api/characters/all call.
+ * @type {Map<string, {mtimeMs: number, result: string[]}>}
+ */
+const dirListCache = new Map();
+
+/**
+ * Asynchronous version of findPngFilesRecursive.
+ * Uses fs.promises.readdir + fs.promises.stat to avoid blocking the event loop
+ * on slow I/O (especially important on Android/Termux with FUSE filesystems).
+ *
+ * Results are cached in memory with the top-level directory's mtimeMs as the
+ * fingerprint. When the mtime hasn't changed, the cached list is returned
+ * directly — no recursive scan is performed.
+ *
+ * @param {string} dirPath Directory to scan
+ * @param {Set<string>} [seen] Internal cycle guard
+ * @returns {Promise<string[]>} Array of relative paths to .png files (forward slashes)
+ */
+export async function findPngFilesRecursiveAsync(dirPath, seen = new Set()) {
+    // Check the in-memory cache first
+    const dirStat = await fs.promises.stat(dirPath).catch(() => null);
+    if (dirStat) {
+        const cached = dirListCache.get(dirPath);
+        if (cached && cached.mtimeMs === dirStat.mtimeMs) {
+            // Cache hit — return a shallow copy so callers can't mutate the cache
+            return cached.result.slice();
+        }
+    }
+
+    // Cache miss — perform the scan
+    const result = await _findPngFilesRecursiveAsyncInner(dirPath, seen);
+
+    // Update cache if we got a valid dirStat
+    if (dirStat) {
+        dirListCache.set(dirPath, { mtimeMs: dirStat.mtimeMs, result });
+    }
+
+    return result;
+}
+
+/**
+ * Inner recursive scan implementation (no caching).
+ * @param {string} dirPath
+ * @param {Set<string>} seen
+ * @returns {Promise<string[]>}
+ */
+async function _findPngFilesRecursiveAsyncInner(dirPath, seen) {
+    let entries;
+    try {
+        entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    } catch {
+        return [];
+    }
+
+    const result = [];
+    const subdirs = [];
+
+    for (const entry of entries) {
+        const entryPath = path.join(dirPath, entry.name);
+
+        let isFile = entry.isFile();
+        let isDir = entry.isDirectory();
+        if (!isFile && !isDir) {
+            try {
+                const stat = await fs.promises.stat(entryPath);
+                isFile = stat.isFile();
+                isDir = stat.isDirectory();
+            } catch {
+                isFile = false;
+                isDir = false;
+            }
+        }
+
+        if (isDir) {
+            let realSubPath;
+            try {
+                realSubPath = await fs.promises.realpath(entryPath);
+            } catch {
+                continue;
+            }
+            if (seen.has(realSubPath)) {
+                continue; // symlink cycle guard
+            }
+            seen.add(realSubPath);
+            subdirs.push({ entryName: entry.name, entryPath });
+            continue;
+        }
+
+        if (isFile && entry.name.endsWith('.png')) {
+            result.push(entry.name);
+        }
+    }
+
+    // Recurse into subdirectories
+    if (subdirs.length > 0) {
+        const subResults = await Promise.all(
+            subdirs.map(async ({ entryName, entryPath }) => {
+                const subResult = await _findPngFilesRecursiveAsyncInner(entryPath, seen);
+                return subResult.map(rel => path.join(entryName, rel));
+            }),
+        );
+        for (const subResult of subResults) {
+            result.push(...subResult);
+        }
+    }
+
+    // Normalize separators to forward slashes for cross-platform relative paths.
+    return result.map(f => f.replace(/\\/g, '/'));
+}

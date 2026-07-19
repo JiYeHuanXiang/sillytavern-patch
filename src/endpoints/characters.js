@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { promises as fsPromises } from 'node:fs';
 import { Buffer } from 'node:buffer';
 
@@ -14,9 +15,9 @@ import storage from 'node-persist';
 
 import { AVATAR_WIDTH, AVATAR_HEIGHT, DEFAULT_AVATAR_PATH } from '../constants.js';
 import { default as validateAvatarUrlMiddleware, getFileNameValidationFunction, forbiddenRegExp, isPathSafe } from '../middleware/validateFileName.js';
-import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements, findPngFilesRecursive } from '../util.js';
+import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements, findPngFilesRecursiveAsync } from '../util.js';
 import { TavernCardValidator } from '../validator/TavernCardValidator.js';
-import { parse, read, write } from '../character-card-parser.js';
+import { parse, read, write, writeInPlace } from '../character-card-parser.js';
 import { readWorldInfoFile } from './worldinfo.js';
 import { invalidateThumbnail } from './thumbnails.js';
 import { importRisuSprites } from './sprites.js';
@@ -35,10 +36,14 @@ const isAndroid = process.platform === 'android';
 // Use shallow character data for the character list
 const useShallowCharacters = !!getConfigValue('performance.lazyLoadCharacters', false, 'boolean');
 const useDiskCache = !!getConfigValue('performance.useDiskCache', true, 'boolean');
+
 // Concurrency for the character-list stat scan. Android/Termux defaults to a small value to avoid
-// stressing slow FUSE/sdcardfs I/O; desktop defaults higher. Set to 1 to force serial (still async,
+// stressing slow FUSE/sdcardfs I/O; desktop defaults higher. On low-CPU machines (≤ 4 cores),
+// a lower default reduces context-switch overhead. Set to 1 to force serial (still async,
 // so it won't block the event loop, only slower). 0 is treated as serial too.
-const characterListConcurrency = getConfigValue('performance.characterListConcurrency', isAndroid ? 8 : 32, 'number');
+const cpuCount = os.cpus().length;
+const defaultConcurrency = isAndroid ? 8 : (cpuCount <= 4 ? 8 : 32);
+const characterListConcurrency = getConfigValue('performance.characterListConcurrency', defaultConcurrency, 'number');
 
 /**
  * Runs an async mapper over `items` with at most `limit` in-flight calls. Preserves input order in
@@ -167,7 +172,9 @@ class DiskCache {
             const cache = await this.instance();
             const validKeys = new Set();
             for (const dir of directoriesList) {
-                const files = findPngFilesRecursive(dir.characters);
+                // Use the async version to avoid blocking the event loop on
+                // large character directories (thousands of PNGs in deep trees).
+                const files = await findPngFilesRecursiveAsync(dir.characters);
                 for (const file of files) {
                     const filePath = path.join(dir.characters, file);
                     const cacheKey = getCacheKey(filePath);
@@ -269,28 +276,47 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         if (useDiskCache && !Buffer.isBuffer(inputFile)) {
             diskCache.syncQueue.add(request.user.profile.handle);
         }
-        /**
-         * Read the image, resize, and save it as a PNG into the buffer.
-         * @returns {Promise<Buffer>} Image buffer
-         */
-        async function getInputImage() {
-            try {
-                if (Buffer.isBuffer(inputFile)) {
-                    return await parseImageBuffer(inputFile, crop);
-                }
 
-                return await tryReadImage(inputFile, crop);
-            } catch (error) {
-                const message = Buffer.isBuffer(inputFile) ? 'Failed to read image buffer.' : `Failed to read image: ${inputFile}.`;
-                console.warn(message, 'Using a fallback image.', error);
-                return await fs.promises.readFile(DEFAULT_AVATAR_PATH);
+        let inputImage;
+
+        // Fast path: when no crop/resize is needed, skip the expensive Jimp decode+reencode
+        // and read the raw PNG buffer directly. This avoids the CPU-heavy WASM PNG codec for
+        // pure-text edits (edit-attribute, fav toggle, merge, rename, etc.).
+        const needsImageProcessing = crop !== undefined || Buffer.isBuffer(inputFile);
+
+        if (!needsImageProcessing && typeof inputFile === 'string') {
+            try {
+                inputImage = fs.readFileSync(inputFile);
+            } catch (readErr) {
+                console.warn(`Failed to read image: ${inputFile}. Using a fallback image.`, readErr);
+                inputImage = fs.readFileSync(DEFAULT_AVATAR_PATH);
             }
+        } else {
+            /**
+             * Read the image, resize, and save it as a PNG into the buffer.
+             * @returns {Promise<Buffer>} Image buffer
+             */
+            async function getInputImage() {
+                try {
+                    if (Buffer.isBuffer(inputFile)) {
+                        return await parseImageBuffer(inputFile, crop);
+                    }
+
+                    return await tryReadImage(inputFile, crop);
+                } catch (error) {
+                    const message = Buffer.isBuffer(inputFile) ? 'Failed to read image buffer.' : `Failed to read image: ${inputFile}.`;
+                    console.warn(message, 'Using a fallback image.', error);
+                    return await fs.promises.readFile(DEFAULT_AVATAR_PATH);
+                }
+            }
+
+            inputImage = await getInputImage();
         }
 
-        const inputImage = await getInputImage();
-
-        // Get the chunks
-        const outputImage = write(inputImage, data);
+        // Get the chunks — use writeInPlace for fast chunk-level replacement
+        // (skips copying all IDAT data), fall back to write() internally on
+        // unexpected buffer structure.
+        const outputImage = writeInPlace(inputImage, data);
         const outputImagePath = path.join(request.user.directories.characters, `${outputFile}.png`);
 
         writeFileAtomicSync(outputImagePath, outputImage);
@@ -302,7 +328,7 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         if (useShallowCharacters) {
             const relPath = `${outputFile}.png`;
             characterIndex.delete(request.user.profile.handle, relPath);
-            characterIndex.flushSync();
+            // markDirty already called by delete(); debounced async flush will persist.
         }
         return true;
     } catch (err) {
@@ -404,6 +430,33 @@ const calculateChatSize = (charDir) => {
     return { chatSize, dateLastChat };
 };
 
+/**
+ * calculateChatSizeAsync - Async version of calculateChatSize.
+ * Uses fs.promises to avoid blocking the event loop on slow I/O.
+ *
+ * @param  {string} charDir The directory where the chats are stored.
+ * @return {Promise<{chatSize: number, dateLastChat: number}>} The total chat size.
+ */
+const calculateChatSizeAsync = async (charDir) => {
+    let chatSize = 0;
+    let dateLastChat = 0;
+
+    try {
+        const chats = await fsPromises.readdir(charDir);
+        if (Array.isArray(chats) && chats.length) {
+            const stats = await Promise.all(chats.map(chat => fsPromises.stat(path.join(charDir, chat))));
+            for (const chatStat of stats) {
+                chatSize += chatStat.size;
+                dateLastChat = Math.max(dateLastChat, chatStat.mtimeMs);
+            }
+        }
+    } catch {
+        // Directory doesn't exist or is unreadable — return defaults
+    }
+
+    return { chatSize, dateLastChat };
+};
+
 // Calculate the total string length of the data object
 const calculateDataSize = (data) => {
     return typeof data === 'object' ? Object.values(data).reduce((acc, val) => acc + String(val).length, 0) : 0;
@@ -415,6 +468,14 @@ const calculateDataSize = (data) => {
  * @returns {{shallow: true, [key: string]: any}} Shallow character
  */
 const toShallow = (character) => {
+    // Truncate long fields to keep the index file small. creator_notes is the
+    // primary offender — some cards embed kilobytes of license/description text.
+    const rawCreatorNotes = _.get(character, 'data.creator_notes', '');
+    const TRUNCATE_LIMIT = 200;
+    const creatorNotes = typeof rawCreatorNotes === 'string' && rawCreatorNotes.length > TRUNCATE_LIMIT
+        ? rawCreatorNotes.slice(0, TRUNCATE_LIMIT) + '…'
+        : rawCreatorNotes;
+
     return {
         shallow: true,
         name: character.name,
@@ -431,7 +492,7 @@ const toShallow = (character) => {
             name: _.get(character, 'data.name', ''),
             character_version: _.get(character, 'data.character_version', ''),
             creator: _.get(character, 'data.creator', ''),
-            creator_notes: _.get(character, 'data.creator_notes', ''),
+            creator_notes: creatorNotes,
             tags: _.get(character, 'data.tags', []),
             extensions: {
                 fav: _.get(character, 'data.extensions.fav', false),
@@ -466,7 +527,7 @@ const processCharacter = async (item, directories, { shallow, charStat }) => {
         character.create_date = jsonObject.create_date || new Date(Math.round(stat.ctimeMs)).toISOString();
         const chatsDirectory = path.join(directories.chats, item.replace('.png', ''));
 
-        const { chatSize, dateLastChat } = calculateChatSize(chatsDirectory);
+        const { chatSize, dateLastChat } = await calculateChatSizeAsync(chatsDirectory);
         character.chat_size = chatSize;
         character.date_last_chat = dateLastChat;
         character.data_size = calculateDataSize(jsonObject?.data);
@@ -537,7 +598,7 @@ const processCharacterList = async (pngFiles, directories, handle) => {
             // chat stats are not part of the PNG fingerprint; refresh them when the chat-dir
             // fingerprint changed, otherwise reuse the cached values.
             if (cached.chatDirMtime !== chatDirMtime) {
-                const { chatSize, dateLastChat } = calculateChatSize(chatsDirectory);
+                const { chatSize, dateLastChat } = await calculateChatSizeAsync(chatsDirectory);
                 shallow.chat_size = chatSize;
                 shallow.date_last_chat = dateLastChat;
                 // Persist the refreshed fingerprint + stats without re-parsing the card.
@@ -1215,7 +1276,7 @@ router.post('/rename', validateAvatarUrlMiddleware, async function (request, res
         // the rename is reflected without waiting for the next /all prune.
         if (useShallowCharacters) {
             characterIndex.delete(request.user.profile.handle, oldAvatarName);
-            characterIndex.flushSync();
+            // markDirty already called by delete(); debounced async flush will persist.
         }
 
         // Return new avatar name to ST
@@ -1474,7 +1535,7 @@ router.post('/merge-attributes', getFileNameValidationFunction('avatar'), async 
                 targetAvatars = avatars;
             } else {
                 // Empty array → scan all characters in the directory
-                targetAvatars = findPngFilesRecursive(request.user.directories.characters);
+                targetAvatars = await findPngFilesRecursiveAsync(request.user.directories.characters);
             }
 
             const updated = [];
@@ -1560,10 +1621,21 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
     fs.unlinkSync(avatarPath);
     invalidateThumbnail(request.user.directories, 'avatar', request.body.avatar_url);
 
+    // Clear the memory cache and schedule disk-cache cleanup for the deleted card.
+    for (const key of memoryCache.keys()) {
+        if (key.startsWith(avatarPath)) {
+            memoryCache.delete(key);
+            break;
+        }
+    }
+    if (useDiskCache) {
+        diskCache.syncQueue.add(request.user.profile.handle);
+    }
+
     // Remove the deleted card from the index so it doesn't linger until the next /all prune.
     if (useShallowCharacters) {
         characterIndex.delete(request.user.profile.handle, request.body.avatar_url);
-        characterIndex.flushSync();
+        // markDirty already called by delete(); debounced async flush will persist.
     }
     let dir_name = (request.body.avatar_url.replace('.png', ''));
 
@@ -1600,7 +1672,7 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
  */
 router.post('/all', async function (request, response) {
     try {
-        const pngFiles = findPngFilesRecursive(request.user.directories.characters);
+        const pngFiles = await findPngFilesRecursiveAsync(request.user.directories.characters);
         if (useShallowCharacters) {
             // Fast path: serve the character list from the on-disk index, only parsing PNG files
             // whose fingerprint changed. Falls back to full parsing for cache misses.
@@ -1782,7 +1854,7 @@ router.post('/duplicate', validateAvatarUrlMiddleware, async function (request, 
         // follows, so prune() can't race the new entry on a crash.
         if (useShallowCharacters) {
             characterIndex.markDirty(request.user.profile.handle);
-            characterIndex.flushSync();
+            // No flushSync — debounced async flush will persist the dirty flag.
         }
         response.send({ path: path.parse(newFilename).base });
     } catch (error) {
