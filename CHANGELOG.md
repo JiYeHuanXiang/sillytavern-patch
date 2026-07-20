@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.18.0-patch-1] - 2026-07-19
+## [1.18.0-patch-1.0] - 2026-07-19
 
 首个正式版本。基于上游 SillyTavern `1.18.0` release 快照，针对国内模型使用场景做定制化改进。
 
