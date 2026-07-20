@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SillyTavern Patch</string>
+    <string name="action_settings">开源地址</string>
+
+    <string name="notification_channel_name">SillyTavern 服务器</string>
+    <string name="notification_stop">停止服务器</string>
+    <string name="exit_confirm_title">退出 SillyTavern</string>
+    <string name="exit_confirm_message">确定要停止服务器并退出吗？</string>
+    <string name="exit_confirm_positive">退出</string>
+    <string name="exit_confirm_negative">取消</string>
+</resources>

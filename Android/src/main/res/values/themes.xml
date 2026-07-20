@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme -->
+    <style name="Theme.STPatch" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">#FF202124</item>
+        <item name="colorPrimaryDark">#FF121216</item>
+        <item name="colorAccent">#FF03DAC5</item>
+    </style>
+
+    <style name="Theme.STPatch.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <!-- 启动页主题：黑底，避免白屏闪烁 -->
+    <style name="Theme.STPatch.Splash">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">#202124</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <!-- WebView 全屏主题 -->
+    <style name="Theme.STPatch.WebView">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+    <style name="Theme.STPatch.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar" />
+    <style name="Theme.STPatch.PopupOverlay" parent="ThemeOverlay.AppCompat.Light" />
+</resources>
