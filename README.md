@@ -5,7 +5,7 @@
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
 [![Version](https://img.shields.io/badge/version-1.18.0--patch--1-brightgreen.svg)](CHANGELOG.md)
 
-基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) `1.18.0` 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
+基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
 
 > ⚠️ 本仓库是个人 fork，与 SillyTavern 官方项目**无任何隶属关系**，亦不代表官方立场。所有定制功能仅做有限测试，请按需评估稳定性。
 
