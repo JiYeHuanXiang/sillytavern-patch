@@ -76,3 +76,4 @@ log.txt
 # 一次性 / 临时脚本
 unfav-all.mjs
 frp/*
+Android/*
