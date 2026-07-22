@@ -2873,6 +2873,31 @@ input[type="file"] {
     padding: 4px 5px;
 }
 
+/* Desktop "Go to page" inline input. Hidden on mobile (mobile uses its own UI). */
+.character_page_jump_input {
+    width: 3.5em;
+    min-width: 3.5em;
+    margin: 0;
+    padding: 4px 2px;
+    text-align: center;
+    font-size: calc(var(--mainFontSize) * 0.85);
+}
+
+/* Hide the native number spinners */
+.character_page_jump_input::-webkit-outer-spin-button,
+.character_page_jump_input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.character_page_jump_input[type=number] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.character_page_jump_button {
+    font-size: calc(var(--mainFontSize) * 0.85);
+}
+
 .bulk_select_checkbox {
     align-self: center;
 }

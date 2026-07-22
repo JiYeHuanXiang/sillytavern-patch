@@ -1083,6 +1083,111 @@ export async function printCharacters(fullRefresh = false) {
 
     favsToHotswap();
     updatePersonaConnectionsAvatarList();
+    installMobileGoToPage();
+}
+
+/**
+ * Returns the total number of pages in the character list pagination.
+ * @returns {number}
+ */
+function getCharactersTotalPage() {
+    const $pg = $('#rm_print_characters_pagination');
+    if ($pg.length && $pg.data('pagination')?.initialized) {
+        return /** @type {number} */ ($pg.pagination('getTotalPage'));
+    }
+    return 1;
+}
+
+/**
+ * Jumps to a given page in the character list. Validates the value against the
+ * available page range. The page value can be passed directly or derived from
+ * an input element.
+ * @param {number|string|HTMLInputElement|JQuery} page - The page number, or an input element to read the value from.
+ */
+function goToCharactersPage(page) {
+    let raw;
+    if (page instanceof HTMLInputElement || page?.jquery) {
+        const $input = $(page);
+        raw = ($input.val()?.toString() ?? '').trim();
+    } else {
+        raw = String(page ?? '').trim();
+    }
+    if (!raw) {
+        return;
+    }
+    const parsed = parseInt(raw, 10);
+    const totalPage = Math.max(getCharactersTotalPage(), 1);
+
+    if (isNaN(parsed) || parsed < 1) {
+        toastr.warning(t`Please enter a page number between 1 and ${totalPage}.`, t`Invalid page`);
+        return;
+    }
+
+    const target = clamp(parsed, 1, totalPage);
+    $('#rm_print_characters_pagination').pagination('go', target);
+
+    if (page instanceof HTMLInputElement || page?.jquery) {
+        $(page).val('');
+    }
+
+    if (target !== parsed) {
+        toastr.info(t`Page ${parsed} is out of range. Jumped to page ${target} (last page).`, t`Page out of range`);
+    }
+}
+
+/**
+ * On mobile, space in the pagination bar is scarce, so we inject a compact
+ * trigger button that opens a popup input for jumping to a page — mirroring the
+ * approach used by installMobileWorldSearch. The desktop inline input is hidden.
+ *
+ * Safe to call repeatedly: once initialised, subsequent calls are a no-op.
+ */
+function installMobileGoToPage() {
+    if (!isMobile()) {
+        return;
+    }
+
+    const $container = $('#rm_print_characters_pagination');
+    if ($container.length === 0 || $container[0].hasAttribute('data-mobile-go-page')) {
+        return;
+    }
+    $container[0].setAttribute('data-mobile-go-page', 'true');
+
+    // Hide the desktop inline input/button on mobile — the popup trigger is used instead.
+    $('#character_page_jump_input, #character_page_jump_button').hide();
+
+    const trigger = document.createElement('i');
+    trigger.id = 'character_page_jump_mobile';
+    trigger.className = 'fa-solid fa-angles-right menu_button character_page_jump_button';
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('tabindex', '0');
+    trigger.title = t`Go to page`;
+    $container.append(trigger);
+
+    async function openGoToPagePopup() {
+        const $pg = $('#rm_print_characters_pagination');
+        const currentNum = $pg.length && $pg.data('pagination')?.initialized
+            ? String($pg.pagination('getCurrentPageNum'))
+            : '1';
+        const total = Math.max(getCharactersTotalPage(), 1);
+        const hint = t`Enter a page number (1 - ${total})`;
+        const result = await Popup.show.input(t`Go to page`, hint, currentNum, {
+            okButton: t`Go`,
+            cancelButton: t`Cancel`,
+        });
+        if (result === null) {
+            return;
+        }
+        goToCharactersPage(result);
+    }
+
+    trigger.addEventListener('click', openGoToPagePopup);
+    trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openGoToPagePopup();
+        }
+    });
 }
 
 /** Checks the state of the current search, and adds/removes the search sorting option accordingly */
@@ -12558,6 +12663,26 @@ jQuery(async function () {
 
     $('#charListGridToggle').on('click', async () => {
         doCharListDisplaySwitch();
+    });
+
+    $('#character_page_jump_button').on('click', function () {
+        goToCharactersPage($('#character_page_jump_input'));
+    });
+    $('#character_page_jump_input').on('keydown', function (e) {
+        // Only trigger on Enter (ignore IME composition)
+        if (e.key === 'Enter' && !e.isComposing) {
+            e.preventDefault();
+            goToCharactersPage(this);
+        }
+    }).on('focus', function () {
+        // Reflect the current page as a starting hint when focusing on desktop.
+        const $pg = $('#rm_print_characters_pagination');
+        if ($pg.length && $pg.data('pagination')?.initialized) {
+            const current = /** @type {number} */ ($pg.pagination('getCurrentPageNum'));
+            if (current && !$(this).val()) {
+                $(this).attr('placeholder', String(current));
+            }
+        }
     });
 
     $('#hideCharPanelAvatarButton').on('click', () => {
