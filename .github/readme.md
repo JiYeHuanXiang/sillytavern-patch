@@ -26,7 +26,7 @@
 
 ### 精简与优化
 
-- 移除未使用的扩展（caption、gallery、regex、stable-diffusion、translate、tts 等）及其对应的后端端点、video generation 代码，减小体积、降低维护面。
+- 移除未使用的扩展（caption、gallery、stable-diffusion、translate、tts 等）及其对应的后端端点、video generation 代码，减小体积、降低维护面。
 - 优化 PNG 角色卡元数据处理逻辑，修复角色列表空白状态问题。
 - 移除 `getEntitiesList` 的内存缓存以修正过期结果问题。
 
@@ -132,8 +132,7 @@ sillytavern-patch/
 ## ⚠️ 已知限制与说明
 
 - **非官方分支**：本仓库不承诺与上游保持同步更新，也不承诺兼容上游的所有扩展与插件。
-- **部分扩展已被移除**：caption、gallery、regex、stable-diffusion、translate、tts 等扩展及对应后端端点已删除，依赖这些功能的用户请使用上游版本。
-- 注：regex 正则功能将在未来重新加入
+- **部分扩展已被移除**：caption、gallery、stable-diffusion、translate、tts 等扩展及对应后端端点已删除，依赖这些功能的用户请使用上游版本。
 - **模型适配范围有限**：思考模式开关主要针对 DeepSeek 验证，其它国内模型（如 Qwen）为按需适配，未做全面回归测试。
 - **安全性**：默认仅监听本机；如需对外暴露请务必配置 `listen`、白名单、CSRF 及 Basic Auth，并评估风险。
 

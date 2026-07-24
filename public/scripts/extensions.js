@@ -172,6 +172,16 @@ export const extension_settings = {
         profiles: [],
     },
     dice: {},
+    /** @type {import('./char-data.js').RegexScriptData[]} */
+    regex: [],
+    /** @type {import('./extensions/regex/index.js').RegexPreset[]} */
+    regex_presets: [],
+    /** @type {string[]} */
+    character_allowed_regex: [],
+    /** @type {Record<string, string[]>} */
+    preset_allowed_regex: {},
+    /** @type {boolean} */
+    regexValidationEnabled: true,
     chromadb: {},
     objective: {},
     quickReply: {},

@@ -8,7 +8,7 @@ import { commonEnumProviders, enumIcons } from '../../slash-commands/SlashComman
 import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { download, equalsIgnoreCaseAndAccents, escapeHtml, getFileText, getSortableDelay, isFalseBoolean, isTrueBoolean, regexFromString, setInfoBlock, uuidv4 } from '../../utils.js';
-import { allowPresetScripts, allowScopedScripts, disallowPresetScripts, disallowScopedScripts, getCurrentPresetAPI, getCurrentPresetName, getRegexScripts, getScriptsByType, isPresetScriptsAllowed, isScopedScriptsAllowed, regex_placement, RegexProvider, runRegexScript, saveScriptsByType, SCRIPT_TYPE_UNKNOWN, SCRIPT_TYPES, substitute_find_regex } from './engine.js';
+import { allowPresetScripts, allowScopedScripts, disallowPresetScripts, disallowScopedScripts, getCurrentPresetAPI, getCurrentPresetName, getRegexScripts, getScriptsByType, isPresetScriptsAllowed, isScopedScriptsAllowed, regex_placement, RegexProvider, runRegexScript, saveScriptsByType, SCRIPT_TYPE_UNKNOWN, SCRIPT_TYPES, substitute_find_regex, validateRegexScript } from './engine.js';
 import { t } from '../../i18n.js';
 import { accountStorage } from '../../util/AccountStorage.js';
 import { getPresetManager } from '../../preset-manager.js';
@@ -1608,14 +1608,40 @@ async function checkCharEmbeddedRegexScripts() {
 
     if (chid !== undefined && !selected_group) {
         const character = characters[chid];
-        const scripts = getScriptsByType(SCRIPT_TYPES.SCOPED);
+        const rawScripts = character?.data?.extensions?.regex_scripts;
 
-        if (Array.isArray(scripts) && scripts.length > 0) {
+        // Only proceed if the card has regex scripts (valid or malformed)
+        if (Array.isArray(rawScripts) && rawScripts.length > 0) {
             if (!isScopedScriptsAllowed(character)) {
                 const checkKey = `AlertRegex_${character.avatar}`;
                 if (!accountStorage.getItem(checkKey)) {
                     accountStorage.setItem(checkKey, 'true');
-                    const template = await renderExtensionTemplateAsync('regex', 'embeddedScripts', {});
+
+                    // Always use the native embedded scripts template as base
+                    let template = await renderExtensionTemplateAsync('regex', 'embeddedScripts', {});
+
+                    // Check for malformed scripts (non-standard character card format)
+                    const validationEnabled = extension_settings.regexValidationEnabled !== false;
+
+                    if (validationEnabled) {
+                        const invalidScripts = rawScripts
+                            .map((s, i) => ({ script: s, index: i }))
+                            .filter(({ script }) => !validateRegexScript(script));
+
+                        if (invalidScripts.length > 0) {
+                            const invalidNames = invalidScripts.map(({ script, index }) =>
+                                escapeHtml(script?.scriptName || `#${index + 1}`)
+                            ).join('、');
+                            const warningHtml = `<div class="m-b-1" style="margin-top:10px; padding:8px; border:1px solid var(--SmartThemeQuoteColor); border-radius:5px;">
+                                <strong>⚠ 检测到不规范的脚本：</strong><br>
+                                以下正则脚本字段无效，将被跳过：<br>
+                                <span style="color: var(--warningColor);">${invalidNames}</span><br>
+                                <small>仅有效的脚本会被执行。</small>
+                            </div>`;
+                            template += warningHtml;
+                        }
+                    }
+
                     const result = await callGenericPopup(template, POPUP_TYPE.CONFIRM, '');
 
                     if (result) {
@@ -1727,6 +1753,7 @@ export async function init() {
 
     const settingsHtml = $(await renderExtensionTemplateAsync('regex', 'dropdown'));
     $('#regex_container').append(settingsHtml);
+    $('#regex_validation_toggle').prop('checked', extension_settings.regexValidationEnabled !== false);
     $('#open_regex_editor').on('click', function () {
         onRegexEditorOpenClick(false, SCRIPT_TYPES.GLOBAL);
     });
@@ -1974,6 +2001,11 @@ export async function init() {
 
         saveSettingsDebounced();
         reloadCurrentChat();
+    });
+
+    $('#regex_validation_toggle').on('input', function () {
+        extension_settings.regexValidationEnabled = !!$(this).prop('checked');
+        saveSettingsDebounced();
     });
 
     $('#regex_preset_toggle').on('input', function () {
