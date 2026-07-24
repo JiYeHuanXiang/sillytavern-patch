@@ -74,6 +74,7 @@
  * @property {number} depth_prompt.depth - The level of detail or nuance targeted by the prompt.
  * @property {string} depth_prompt.prompt - The actual prompt text used for deeper character interaction.
  * @property {"system" | "user" | "assistant"} depth_prompt.role - The role the character takes on during the prompted interaction (system, user, or assistant).
+ * @property {RegexScriptData[]} regex_scripts - Custom regex scripts for the character.
  * // Non-standard extensions added by external tools
  * @property {string} [pygmalion_id] - The unique identifier assigned to the character by the Pygmalion.chat.
  * @property {string} [github_repo] - The gitHub repository associated with the character.

@@ -90,6 +90,39 @@ export class RegexProvider {
 }
 
 /**
+ * Maximum time (ms) allowed for a single regex replacement before it's treated as ReDoS.
+ */
+const REGEX_TIMEOUT_MS = 100;
+
+/**
+ * Validates a regex script's field types to prevent crashes from malformed character cards.
+ * @param {any} script The script to validate
+ * @returns {boolean} True if the script has valid field types
+ */
+export function validateRegexScript(script) {
+    if (!script || typeof script !== 'object') {
+        return false;
+    }
+    // findRegex must be a string
+    if (typeof script.findRegex !== 'string') {
+        return false;
+    }
+    // placement must be an array
+    if (!Array.isArray(script.placement)) {
+        return false;
+    }
+    // replaceString must be a string (default to empty if missing)
+    if (script.replaceString !== undefined && typeof script.replaceString !== 'string') {
+        return false;
+    }
+    // trimStrings must be an array (default to empty if missing)
+    if (script.trimStrings !== undefined && !Array.isArray(script.trimStrings)) {
+        return false;
+    }
+    return true;
+}
+
+/**
  * Retrieves the list of regex scripts by combining the scripts from the extension settings and the character data
  *
  * @param {GetRegexScriptsOptions} options Options for retrieving the regex scripts
@@ -116,7 +149,11 @@ export function getScriptsByType(scriptType, { allowedOnly } = DEFAULT_GET_REGEX
                 return [];
             }
             const scopedScripts = characters[this_chid]?.data?.extensions?.regex_scripts;
-            return Array.isArray(scopedScripts) ? scopedScripts : [];
+            if (!Array.isArray(scopedScripts)) {
+                return [];
+            }
+            // Filter out scripts with invalid field types from malformed character cards
+            return scopedScripts.filter(validateRegexScript);
         }
         case SCRIPT_TYPES.PRESET: {
             if (allowedOnly && !extension_settings?.preset_allowed_regex?.[getCurrentPresetAPI()]?.includes(getCurrentPresetName())) {
@@ -371,7 +408,7 @@ export function getRegexedString(rawString, placement, { characterOverride, isMa
                 }
             }
 
-            if (script.placement.includes(placement)) {
+            if (Array.isArray(script.placement) && script.placement.includes(placement)) {
                 finalString = runRegexScript(script, finalString, { characterOverride });
             }
         }
@@ -416,9 +453,20 @@ export function runRegexScript(regexScript, rawString, { characterOverride } = {
     }
 
     // Run replacement. Currently does not support the Overlay strategy
+    const replaceStr = typeof regexScript.replaceString === 'string' ? regexScript.replaceString : '';
+    // ReDoS guard: detect catastrophic backtracking via time-based check
+    const startTime = performance.now();
+    let timedOut = false;
     newString = rawString.replace(findRegex, function (match) {
+        if (!timedOut && performance.now() - startTime > REGEX_TIMEOUT_MS) {
+            timedOut = true;
+            console.warn(`runRegexScript: Regex "${regexScript.scriptName}" exceeded ${REGEX_TIMEOUT_MS}ms, possible ReDoS. Aborting.`);
+        }
+        if (timedOut) {
+            return arguments[0];
+        }
         const args = [...arguments];
-        const replaceString = regexScript.replaceString.replace(/{{match}}/gi, '$0');
+        const replaceString = replaceStr.replace(/{{match}}/gi, '$0');
         const replaceWithGroups = replaceString.replaceAll(/\$(\d+)|\$<([^>]+)>/g, (_, num, groupName) => {
             if (num) {
                 // Handle numbered capture groups ($1, $2, etc.)
@@ -456,6 +504,9 @@ export function runRegexScript(regexScript, rawString, { characterOverride } = {
  */
 function filterString(rawString, trimStrings, { characterOverride } = {}) {
     let finalString = rawString;
+    if (!Array.isArray(trimStrings)) {
+        return finalString;
+    }
     trimStrings.forEach((trimString) => {
         const subTrimString = substituteParams(trimString, { name2Override: characterOverride });
         finalString = finalString.replaceAll(subTrimString, '');
