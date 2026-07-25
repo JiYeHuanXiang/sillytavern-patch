@@ -722,6 +722,39 @@ export function delay(ms) {
 }
 
 /**
+ * Runs an async mapper over `items` with at most `limit` in-flight calls. Preserves input order in
+ * the output array. `limit <= 1` runs serially (await one by one), which still yields to the event
+ * loop between iterations — unlike a plain `for` of sync calls.
+ *
+ * Used by batch operations (import, export, reload) to avoid sending too many concurrent requests,
+ * which can freeze the UI on mobile / low-RAM devices or overwhelm slow backends.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit Max in-flight calls
+ * @param {(item: T, index: number) => Promise<R>} fn
+ * @returns {Promise<(R)[]>}
+ */
+export async function mapWithConcurrency(items, limit, fn) {
+    const results = new Array(items.length);
+    if (!limit || limit <= 1) {
+        for (let i = 0; i < items.length; i++) {
+            results[i] = await fn(items[i], i);
+        }
+        return results;
+    }
+    let cursor = 0;
+    async function worker() {
+        while (cursor < items.length) {
+            const i = cursor++;
+            results[i] = await fn(items[i], i);
+        }
+    }
+    const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+    await Promise.all(workers);
+    return results;
+}
+
+/**
  * Checks if an array is a subset of another array.
  * @param {any[]} a Array A
  * @param {any[]} b Array B

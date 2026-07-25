@@ -17,8 +17,9 @@ import {
 import { favsToHotswap } from './RossAscends-mods.js';
 import { loader } from './action-loader.js';
 import { convertCharacterToPersona } from './personas.js';
-import { callGenericPopup, POPUP_TYPE } from './popup.js';
+import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from './popup.js';
 import { createTagInput, getTagKeyForEntity, getTagsList, printTagList, tag_map, compareTagsForSort, removeTagFromMap, importTags, tag_import_setting } from './tags.js';
+import { download } from './utils.js';
 import { t } from './i18n.js';
 
 /**
@@ -123,6 +124,43 @@ class CharacterContextMenu {
         await deleteCharacter(characterKey, { deleteChats: deleteChats });
     };
 
+    /**
+     * Export one or more characters as a ZIP archive.
+     * Uses the streaming /api/characters/export/batch endpoint so memory usage
+     * stays low even for hundreds of cards.
+     *
+     * @param {string[]} avatarList List of avatar file names to export
+     * @param {'png'|'json'} format Export format
+     * @returns {Promise<void>}
+     */
+    static export = async (avatarList, format = 'png') => {
+        if (!avatarList || avatarList.length === 0) {
+            toastr.warning(t`No characters selected for export.`);
+            return;
+        }
+
+        const response = await fetch('/api/characters/export/batch', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ avatars: avatarList, format }),
+        });
+
+        if (!response.ok) {
+            let message = t`Export failed`;
+            try {
+                const errorData = await response.json();
+                if (errorData?.error) message = errorData.error;
+            } catch { /* ignore parse error */ }
+            toastr.error(message);
+            return;
+        }
+
+        const zipFileName = response.headers.get('Content-Disposition')?.match(/filename="?(.+?)"?(?:;|$)/)?.[1]
+            ?? `characters_export.zip`;
+        const blob = await response.blob();
+        download(blob, zipFileName, 'application/zip');
+    };
+
     static #getCharacter = (characterId) => characters[characterId] ?? null;
 
     /**
@@ -162,6 +200,7 @@ class CharacterContextMenu {
         const contextMenuItems = [
             { id: 'character_context_menu_favorite', callback: characterGroupOverlay.handleContextMenuFavorite },
             { id: 'character_context_menu_duplicate', callback: characterGroupOverlay.handleContextMenuDuplicate },
+            { id: 'character_context_menu_export', callback: characterGroupOverlay.handleContextMenuExport },
             { id: 'character_context_menu_delete', callback: characterGroupOverlay.handleContextMenuDelete },
             { id: 'character_context_menu_persona', callback: characterGroupOverlay.handleContextMenuPersona },
             { id: 'character_context_menu_tag', callback: characterGroupOverlay.handleContextMenuTag },
@@ -881,6 +920,66 @@ class BulkEditOverlay {
         buildAvatarList($('#bulk_delete_avatars_block'), entities);
 
         return promise;
+    };
+
+    /**
+     * Handle bulk export of selected characters.
+     * Shows a format selection popup, then streams the ZIP download.
+     *
+     * @returns {Promise<void>}
+     */
+    handleContextMenuExport = async () => {
+        const characterIds = this.selectedCharacters;
+        const avatarList = characterIds.map(id => characters[id]?.avatar).filter(a => a);
+
+        if (avatarList.length === 0) {
+            toastr.warning(t`No characters selected for export.`);
+            this.browseState();
+            return;
+        }
+
+        // Format selection popup
+        const POPUP_RESULT_PNG = POPUP_RESULT.CUSTOM1;
+        const POPUP_RESULT_JSON = POPUP_RESULT.CUSTOM2;
+        const result = await callGenericPopup(
+            `<h3>${t`Export Characters`}</h3>` +
+            `<p>${t`Export ${avatarList.length} character(s) as a ZIP archive. Subdirectory structure is preserved.`}</p>`,
+            POPUP_TYPE.CONFIRM,
+            null,
+            {
+                okButton: false,
+                customButtons: [
+                    { text: t`Export as PNG`, result: POPUP_RESULT_PNG, classes: ['popup-button-ok'] },
+                    { text: t`Export as JSON`, result: POPUP_RESULT_JSON, classes: ['popup-button-ok'] },
+                ],
+                cancelButton: t`Cancel`,
+            },
+        );
+
+        if (!result) {
+            this.browseState();
+            return;
+        }
+
+        const format = result === POPUP_RESULT_JSON ? 'json' : 'png';
+
+        const loaderHandle = loader.show({
+            slug: 'bulk-export',
+            title: t`Bulk Export`,
+            message: t`Exporting ${avatarList.length} character(s)…`,
+            toastMode: loader.ToastMode.STATIC,
+        });
+
+        try {
+            await CharacterContextMenu.export(avatarList, format);
+            toastr.success(t`Exported ${avatarList.length} character(s).`);
+        } catch (error) {
+            console.error('Bulk export failed:', error);
+            toastr.error(t`Bulk export failed.`);
+        } finally {
+            await loaderHandle.hide();
+            this.browseState();
+        }
     };
 
     /**

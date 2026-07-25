@@ -75,6 +75,14 @@ async function onDeleteButtonClick() {
 }
 
 /**
+ * Exports all characters that have been selected via the bulk checkboxes.
+ */
+async function onExportButtonClick() {
+    console.log('Export button clicked');
+    await characterGroupOverlay.handleContextMenuExport();
+}
+
+/**
  * Enables bulk selection by adding a checkbox next to each character.
  */
 function enableBulkSelect() {
@@ -121,6 +129,7 @@ export function initBulkEdit() {
     $('#bulkEditButton').on('click', onEditButtonClick);
     $('#bulkSelectAllButton').on('click', onSelectAllButtonClick);
     $('#bulkDeleteButton').on('click', onDeleteButtonClick);
+    $('#bulkExportButton').on('click', onExportButtonClick);
 
     const characterContextMenu = new CharacterContextMenu(characterGroupOverlay);
     eventSource.on(event_types.CHARACTER_PAGE_LOADED, characterGroupOverlay.onPageLoad);

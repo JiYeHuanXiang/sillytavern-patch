@@ -12,6 +12,7 @@ import _ from 'lodash';
 import mime from 'mime-types';
 import { Jimp, JimpMime } from '../jimp.js';
 import storage from 'node-persist';
+import archiver from 'archiver';
 
 import { AVATAR_WIDTH, AVATAR_HEIGHT, DEFAULT_AVATAR_PATH } from '../constants.js';
 import { default as validateAvatarUrlMiddleware, getFileNameValidationFunction, forbiddenRegExp, isPathSafe } from '../middleware/validateFileName.js';
@@ -1903,5 +1904,121 @@ router.post('/export', validateAvatarUrlMiddleware, async function (request, res
     } catch (err) {
         console.error('Character export failed', err);
         response.sendStatus(500);
+    }
+});
+
+// Maximum number of characters allowed in a single batch export. Prevents OOM on
+// low-RAM devices by capping the per-request ZIP size. Configurable via config.yaml.
+const BATCH_EXPORT_LIMIT = getConfigValue('performance.batchExportLimit', 500, 'number');
+
+/**
+ * HTTP POST endpoint for the "/api/characters/export/batch" route.
+ *
+ * Streams a ZIP archive containing multiple character cards. Each character's
+ * subdirectory path is preserved inside the archive (e.g. "folder/name.png").
+ *
+ * Unlike the single-export `/export`, this endpoint uses archiver to pipe the
+ * ZIP stream directly to the HTTP response without buffering all cards in memory,
+ * making it safe for large batches on low-RAM devices. Card reads are concurrency-
+ * limited via `characterListConcurrency` (Android default 8, desktop 32).
+ *
+ * @param {import('express').Request} request
+ * @param {import('express').Response} response
+ */
+router.post('/export/batch', async function (request, response) {
+    try {
+        if (!request.body || !request.body.avatars || !Array.isArray(request.body.avatars) || !request.body.format) {
+            return response.sendStatus(400);
+        }
+
+        const format = request.body.format;
+        const avatars = request.body.avatars;
+
+        if (format !== 'png' && format !== 'json') {
+            return response.status(400).send({ error: 'Unsupported format. Use "png" or "json".' });
+        }
+
+        if (avatars.length === 0) {
+            return response.status(400).send({ error: 'No avatars provided.' });
+        }
+
+        if (avatars.length > BATCH_EXPORT_LIMIT) {
+            return response.status(400).send({ error: `Too many characters. The limit is ${BATCH_EXPORT_LIMIT} per export.` });
+        }
+
+        // Validate all avatar paths up front so we can fail fast and avoid a partial ZIP.
+        const validEntries = [];
+        for (const avatar of avatars) {
+            if (typeof avatar !== 'string' || !isPathSafe(request.user.directories.characters, avatar)) {
+                console.warn(`Batch export: skipping unsafe avatar path: ${avatar}`);
+                continue;
+            }
+            const filePath = path.join(request.user.directories.characters, avatar);
+            if (!fs.existsSync(filePath)) {
+                console.warn(`Batch export: skipping missing file: ${avatar}`);
+                continue;
+            }
+            validEntries.push({ avatar, filePath });
+        }
+
+        if (validEntries.length === 0) {
+            return response.status(400).send({ error: 'No valid character files to export.' });
+        }
+
+        // Set up streaming ZIP response
+        const zipFileName = `characters_${humanizedDateTime()}.zip`;
+        response.setHeader('Content-Type', 'application/zip');
+        response.setHeader('Content-Disposition', `attachment; filename="${encodeURI(zipFileName)}"`);
+
+        const archive = archiver('zip', { zlib: { level: 0 } }); // level 0 = store only, no CPU-heavy compression
+        archive.on('error', (err) => {
+            console.error('Batch export archive error:', err);
+            // If headers not yet sent, return JSON error; otherwise the stream is already going.
+            if (!response.headersSent) {
+                response.status(500).send({ error: 'Failed to create archive.' });
+            } else {
+                response.destroy();
+            }
+        });
+        archive.on('warning', (err) => console.warn('Batch export archive warning:', err));
+
+        // Pipe archive to response — never buffer the whole ZIP in memory.
+        archive.pipe(response);
+
+        // Concurrency-limited card reading so we don't exhaust file descriptors or RAM
+        // on low-end devices (Android/Termux).
+        await mapWithConcurrency(validEntries, characterListConcurrency, async ({ avatar, filePath }) => {
+            try {
+                if (format === 'png') {
+                    const rawBuffer = await fsPromises.readFile(filePath);
+                    const rawData = read(rawBuffer);
+                    const mutatedData = mutateJsonString(rawData, unsetPrivateFields);
+                    const mutatedBuffer = write(rawBuffer, mutatedData);
+                    // Preserve subdirectory structure in the archive entry name.
+                    archive.append(mutatedBuffer, { name: avatar });
+                } else {
+                    // json format
+                    const json = await readCharacterData(filePath);
+                    if (json === undefined) {
+                        console.warn(`Batch export: no character data in ${avatar}, skipping.`);
+                        return;
+                    }
+                    const jsonObject = getCharaCardV2(JSON.parse(json), request.user.directories);
+                    unsetPrivateFields(jsonObject);
+                    const jsonString = JSON.stringify(jsonObject, null, 4);
+                    const jsonName = avatar.replace(/\.png$/i, '.json');
+                    archive.append(jsonString, { name: jsonName });
+                }
+            } catch (err) {
+                console.error(`Batch export: failed to process ${avatar}:`, err);
+            }
+        });
+
+        await archive.finalize();
+    } catch (err) {
+        console.error('Batch character export failed', err);
+        if (!response.headersSent) {
+            response.status(500).send({ error: 'Batch export failed.' });
+        }
     }
 });

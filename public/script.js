@@ -185,6 +185,7 @@ import {
     clamp,
     shakeElement,
     createTimeout,
+    mapWithConcurrency,
 } from './scripts/utils.js';
 import { debounce_timeout, GENERATION_TYPE_TRIGGERS, IGNORE_SYMBOL, inject_ids, MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE, OVERSWIPE_BEHAVIOR, SCROLL_BEHAVIOR, SWIPE_DIRECTION, SWIPE_SOURCE, SWIPE_STATE } from './scripts/constants.js';
 
@@ -10604,18 +10605,60 @@ export async function processDroppedFiles(files, data = new Map()) {
         'byaf',
     ];
 
-    const avatarFileNames = [];
+    // Filter valid files first so progress counting is accurate.
+    const validFiles = [];
     for (const file of files) {
         const extension = file.name.split('.').pop().toLowerCase();
         if (allowedMimeTypes.some(x => file.type.startsWith(x)) || allowedExtensions.includes(extension)) {
-            const preservedName = data instanceof Map && data.get(file);
+            validFiles.push(file);
+        } else {
+            toastr.warning(t`Unsupported file type: ` + file.name);
+        }
+    }
+
+    if (validFiles.length === 0) return;
+
+    // Concurrency: mobile devices get a smaller pool to avoid UI freezes and
+    // overwhelming limited-bandwidth backends. Desktop uses a larger pool.
+    const importConcurrency = isMobile() ? 2 : 4;
+    let completed = 0;
+
+    // Show a stoppable loader for large batches so users can cancel mid-import.
+    const showLoader = validFiles.length > 5;
+    let loaderHandle = null;
+    let cancelled = false;
+    if (showLoader) {
+        loaderHandle = loader.show({
+            blocking: false,
+            toastMode: loader.ToastMode.STOPPABLE,
+            title: t`Importing Characters`,
+            message: t`Importing 0/${validFiles.length}…`,
+            stopTooltip: t`Cancel`,
+            onStop: () => { cancelled = true; },
+        });
+    }
+
+    const avatarFileNames = [];
+    await mapWithConcurrency(validFiles, importConcurrency, async (file) => {
+        if (cancelled) return;
+        const preservedName = data instanceof Map && data.get(file);
+        try {
             const avatarFileName = await importCharacter(file, { preserveFileName: preservedName });
             if (avatarFileName !== undefined) {
                 avatarFileNames.push(avatarFileName);
             }
-        } else {
-            toastr.warning(t`Unsupported file type: ` + file.name);
+        } catch (error) {
+            console.error('Error importing character', file.name, error);
         }
+        completed++;
+        if (loaderHandle && loaderHandle.isActive) {
+            const toastEl = $(`.action-loader-toast[data-loader-id="${loaderHandle.id}"] .action-loader-message`);
+            toastEl.text(t`Importing ${completed}/${validFiles.length}…`);
+        }
+    });
+
+    if (loaderHandle && loaderHandle.isActive) {
+        await loaderHandle.hide();
     }
 
     if (avatarFileNames.length > 0) {
@@ -10630,9 +10673,11 @@ export async function processDroppedFiles(files, data = new Map()) {
  */
 async function importCharactersTags(avatarFileNames) {
     // Incrementally load each imported character instead of a full server reload.
-    for (const avatarFileName of avatarFileNames) {
+    // Use concurrency to avoid serial round-trips when many characters are imported.
+    const loadConcurrency = isMobile() ? 2 : 4;
+    await mapWithConcurrency(avatarFileNames, loadConcurrency, async (avatarFileName) => {
         await loadSingleCharacter(avatarFileName, { printList: false });
-    }
+    });
     if (avatarFileNames.length > 0) {
         await printCharacters();
     }
