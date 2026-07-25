@@ -3,7 +3,6 @@ services:
     build: ..
     container_name: sillytavern
     hostname: sillytavern
-    image: ghcr.io/sillytavern/sillytavern:latest
     environment:
       - NODE_ENV=production
       - FORCE_COLOR=1
