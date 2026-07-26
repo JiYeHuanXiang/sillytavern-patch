@@ -6248,6 +6248,7 @@
                                                     <option value="0" data-i18n="Natural order">Natural order</option>
                                                     <option value="1" data-i18n="List order">List order</option>
                                                     <option value="3" data-i18n="Pooled order">Pooled order</option>
+                                                    <option value="4" data-i18n="Strict rotation">Strict rotation</option>
                                                 </select>
                                             </div>
                                             <div class="flex1 flexGap5">
@@ -6288,11 +6289,16 @@
                                             </div>
                                             <div id="rm_group_submit" class="heightFitContent margin0 menu_button fa-solid fa-fw fa-check" title="Create" data-i18n="[title]Create"></div>
                                             <div id="rm_group_restore_avatar" class="heightFitContent margin0 menu_button fa-solid fa-fw fa-images" title="Restore collage avatar" data-i18n="[title]Restore collage avatar"></div>
+                                            <div id="rm_group_export_config" class="heightFitContent margin0 menu_button fa-solid fa-fw fa-file-export" title="Export multi-character chat config" data-i18n="[title]Export multi-character chat config"></div>
                                             <div id="rm_group_delete" class="heightFitContent margin0 menu_button fa-solid fa-fw fa-trash-can" title="Delete" data-i18n="[title]Delete"></div>
                                             <div class="flex1">
                                                 <label class="checkbox_label whitespacenowrap">
                                                     <input id="rm_group_allow_self_responses" type="checkbox" />
                                                     <span data-i18n="Allow self responses">Allow self responses</span>
+                                                </label>
+                                                <label id="rm_group_turn_isolation_label" class="checkbox_label whitespacenowrap" title="When on, each character only sees the user and its own past messages (not what other characters said). When off, every character sees the full shared conversation." data-i18n="[title]When on, each character only sees the user and its own past messages (not what other characters said). When off, every character sees the full shared conversation.">
+                                                    <input id="rm_group_turn_isolation" type="checkbox" />
+                                                    <span data-i18n="Isolate dialogue per character">Isolate dialogue per character</span>
                                                 </label>
                                                 <label id="rm_group_automode_label" class="checkbox_label whitespacenowrap">
                                                     <input id="rm_group_automode" type="checkbox" />

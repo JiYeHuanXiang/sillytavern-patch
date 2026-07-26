@@ -1156,3 +1156,85 @@ export async function init() {
         `,
     }));
 }
+
+// ---- Per-character connection control (multichat / group chat extension) ----
+// These exports let the group chat apply a different connection profile to each
+// member without the caller needing access to the private applyConnectionProfile.
+
+/**
+ * Looks up a connection profile by id or (fuzzy) name.
+ * @param {string} profileIdOrName Profile id or name
+ * @returns {ConnectionProfile | undefined}
+ */
+export function getConnectionProfile(profileIdOrName) {
+    const profiles = extension_settings.connectionManager?.profiles ?? [];
+    if (!profileIdOrName) {
+        return undefined;
+    }
+    return profiles.find(p => p.id === profileIdOrName)
+        ?? profiles.find(p => p.name === profileIdOrName);
+}
+
+/**
+ * Snapshot the current global connection selection so it can be restored later.
+ * Returns enough info to rebuild the exact same state.
+ * @returns {{ selectedProfile: string|null }}
+ */
+export function snapshotConnection() {
+    return {
+        selectedProfile: extension_settings.connectionManager?.selectedProfile ?? null,
+    };
+}
+
+/**
+ * Restore a previously taken snapshot of the global connection selection.
+ * Re-applies the selected profile (or clears the selection when it was null).
+ * @param {{ selectedProfile: string|null }} snapshot Snapshot from snapshotConnection
+ * @param {boolean} [apply] Whether to actually re-apply the profile to live settings
+ * @returns {Promise<void>}
+ */
+export async function restoreConnection(snapshot, apply = true) {
+    if (!snapshot) {
+        return;
+    }
+    if (!extension_settings.connectionManager) {
+        return;
+    }
+    extension_settings.connectionManager.selectedProfile = snapshot.selectedProfile ?? null;
+
+    // Keep the <select> in sync if it exists in the DOM.
+    const profilesEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('connection_profiles'));
+    if (profilesEl) {
+        profilesEl.value = snapshot.selectedProfile ?? '';
+    }
+
+    if (!apply) {
+        return;
+    }
+
+    if (!snapshot.selectedProfile) {
+        await eventSource.emit(event_types.CONNECTION_PROFILE_LOADED, NONE);
+        return;
+    }
+    const profile = extension_settings.connectionManager.profiles.find(p => p.id === snapshot.selectedProfile);
+    if (profile) {
+        await applyConnectionProfile(profile);
+        await eventSource.emit(event_types.CONNECTION_PROFILE_LOADED, profile.name);
+    }
+}
+
+/**
+ * Apply a connection profile for a single group-member generation.
+ * Public wrapper around the private applyConnectionProfile so the group chat
+ * module can switch connections per character without importing internals.
+ * @param {string} profileIdOrName Profile id (or name) to apply
+ * @returns {Promise<boolean>} True if a profile was found and applied
+ */
+export async function applyConnectionProfileById(profileIdOrName) {
+    const profile = getConnectionProfile(profileIdOrName);
+    if (!profile) {
+        return false;
+    }
+    await applyConnectionProfile(profile);
+    return true;
+}

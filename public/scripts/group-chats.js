@@ -18,6 +18,7 @@ import {
     paginationDropdownChangeHandler,
     waitUntilCondition,
     uuidv4,
+    download,
 } from './utils.js';
 import { RA_CountCharTokens, humanizedDateTime, dragElement, favsToHotswap, getMessageTimeStamp } from './RossAscends-mods.js';
 import { power_user, loadMovingUIState, sortEntitiesList } from './power-user.js';
@@ -86,6 +87,8 @@ import { POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
 import { t } from './i18n.js';
 import { accountStorage } from './util/AccountStorage.js';
 import { compressRequest } from './request-compression.js';
+import { applyConnectionProfileById, getConnectionProfile, restoreConnection, snapshotConnection } from './extensions/connection-manager/index.js';
+import { extension_settings } from './extensions.js';
 
 export {
     selected_group,
@@ -123,6 +126,7 @@ export const group_activation_strategy = {
     LIST: 1,
     MANUAL: 2,
     POOLED: 3,
+    STRICT_ROTATION: 4,
 };
 
 export const group_generation_mode = {
@@ -230,6 +234,20 @@ async function validateGroup(group) {
         return character;
     });
 
+    // Clean up connection profile bindings for members that are no longer in the group
+    if (group.member_profiles && typeof group.member_profiles === 'object') {
+        const staleProfiles = Object.keys(group.member_profiles).filter(avatar => !group.members.includes(avatar));
+        if (staleProfiles.length) {
+            for (const avatar of staleProfiles) {
+                delete group.member_profiles[avatar];
+            }
+            dirty = true;
+        }
+    } else {
+        group.member_profiles = {};
+        dirty = true;
+    }
+
     // Remove duplicate chat ids
     if (Array.isArray(group.chats)) {
         const lengthBefore = group.chats.length;
@@ -256,6 +274,17 @@ export async function getGroupChat(groupId, reload = false) {
     if (!group) {
         console.warn('Group not found', groupId);
         return;
+    }
+
+    // Multichat: ensure new fields exist on legacy group objects
+    if (!group.member_profiles || typeof group.member_profiles !== 'object') {
+        group.member_profiles = {};
+    }
+    if (group.strict_rotation_cursor === undefined) {
+        group.strict_rotation_cursor = 0;
+    }
+    if (group.turn_isolation === undefined) {
+        group.turn_isolation = false;
     }
 
     // Run validation before any loading
@@ -787,6 +816,16 @@ async function getGroups() {
             if (Array.isArray(group.chats) && group.chats.some(x => typeof x === 'number')) {
                 group.chats = group.chats.map(x => String(x));
             }
+            // Multichat: backfill new fields on legacy group objects
+            if (!group.member_profiles || typeof group.member_profiles !== 'object') {
+                group.member_profiles = {};
+            }
+            if (group.strict_rotation_cursor === undefined) {
+                group.strict_rotation_cursor = 0;
+            }
+            if (group.turn_isolation === undefined) {
+                group.turn_isolation = false;
+            }
         }
     }
 }
@@ -1027,6 +1066,14 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
             activatedMembers = activatePooledOrder(enabledMembers, lastMessage, isUserInput);
         } else if (activationStrategy === group_activation_strategy.MANUAL && !isUserInput) {
             activatedMembers = shuffle(enabledMembers).slice(0, 1).map(x => characters.findIndex(y => y.avatar === x)).filter(x => x !== -1);
+        } else if (activationStrategy === group_activation_strategy.STRICT_ROTATION) {
+            // Strict turn rotation: only one character speaks per trigger, then the
+            // cursor advances to the next enabled member (wrapping around).
+            group.strict_rotation_cursor = Number(group.strict_rotation_cursor ?? 0);
+            const clampedIndex = enabledMembers.length ? group.strict_rotation_cursor % enabledMembers.length : 0;
+            const nextAvatar = enabledMembers[clampedIndex];
+            const nextChId = characters.findIndex(y => y.avatar === nextAvatar);
+            activatedMembers = nextChId !== -1 ? [nextChId] : [];
         }
 
         if (activatedMembers.length === 0) {
@@ -1046,12 +1093,24 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
             }
         }
         await eventSource.emit(event_types.GROUP_WRAPPER_STARTED, { selected_group, type });
+
+        // Snapshot the global connection so per-member profile switches don't leak out
+        const connectionSnapshot = snapshotConnection();
+
         // now the real generation begins: cycle through every activated character
         for (const chId of activatedMembers) {
             throwIfAborted();
             deactivateSendButtons();
             setCharacterId(chId);
             setCharacterName(characters[chId].name);
+
+            // Per-character connection: switch to the member's bound profile (if any)
+            const memberAvatar = characters[chId]?.avatar;
+            const memberProfileId = memberAvatar && group.member_profiles ? group.member_profiles[memberAvatar] : null;
+            if (memberProfileId) {
+                await applyConnectionProfileById(memberProfileId);
+            }
+
             if (power_user.show_group_chat_queue) {
                 printGroupMembers();
             }
@@ -1073,7 +1132,22 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
                 groupChatQueueOrder.forEach((value, key, map) => map.set(key, value - 1));
             }
         }
+
+        // Strict rotation: advance the cursor to the next enabled member for the next turn.
+        if (activationStrategy === group_activation_strategy.STRICT_ROTATION && activatedMembers.length) {
+            const enabledMembers = group.members.filter(x => !group.disabled_members.includes(x));
+            if (enabledMembers.length) {
+                group.strict_rotation_cursor = ((group.strict_rotation_cursor ?? 0) + 1) % enabledMembers.length;
+                await editGroup(group.id, true, false);
+            }
+        }
     } finally {
+        // Restore the global connection that was active before per-member switching
+        try {
+            await restoreConnection(connectionSnapshot);
+        } catch (e) {
+            console.error('Failed to restore connection after group generation', e);
+        }
         is_group_generating = false;
         setSendButtonState(false);
         setCharacterId(undefined);
@@ -1713,6 +1787,9 @@ function getGroupCharacterBlock(character) {
     const tagsElement = template.find('.tags');
     printTagList(tagsElement, { forEntityOrKey: characters.indexOf(character), tagOptions: { isCharacterList: true } });
 
+    // Per-character connection profile selector (multichat)
+    appendMemberProfileSelect(template, character);
+
     if (!openGroupId) {
         template.find('[data-action="speak"]').hide();
         template.find('[data-action="enable"]').hide();
@@ -1720,6 +1797,58 @@ function getGroupCharacterBlock(character) {
     }
 
     return template;
+}
+
+/**
+ * Builds and appends a connection-profile <select> to a group member block so
+ * each member can use a different AI connection (model / url / key) in the chat.
+ * @param {JQuery<HTMLElement>} template Cloned member block element
+ * @param {Character} character Character for this member
+ */
+function appendMemberProfileSelect(template, character) {
+    const group = openGroupId && groups.find((x) => x.id == openGroupId);
+    if (!group) {
+        return;
+    }
+
+    if (!group.member_profiles || typeof group.member_profiles !== 'object') {
+        group.member_profiles = {};
+    }
+
+    const profiles = (extension_settings.connectionManager?.profiles ?? []).filter(p => p && p.id && p.name);
+    if (!profiles.length) {
+        return;
+    }
+
+    const selectedProfile = group.member_profiles[character.avatar] ?? '';
+    const select = $('<select></select>')
+        .addClass('text_pole group_member_profile_select widthUnset')
+        .attr('title', t`AI connection for this character`)
+        .attr('data-avatar', character.avatar);
+
+    // Default = follow global connection
+    const defaultOption = $('<option></option>')
+        .val('')
+        .text(t`Default (global connection)`);
+    if (!selectedProfile) {
+        defaultOption.prop('selected', true);
+    }
+    select.append(defaultOption);
+
+    for (const profile of profiles) {
+        const opt = $('<option></option>').val(profile.id).text(profile.name);
+        if (selectedProfile === profile.id) {
+            opt.prop('selected', true);
+        }
+        select.append(opt);
+    }
+
+    // Compact label + select row
+    const wrapper = $('<div class="group_member_profile_row flex-container flexGap5 alignitemscenter"></div>');
+    wrapper.append($('<span class="group_member_profile_label fa-solid fa-link"></span>'));
+    wrapper.append(select);
+
+    template.find('.group_member_name').after(wrapper);
 }
 
 /**
@@ -1763,6 +1892,15 @@ async function onGroupSelfResponsesClick() {
         let _thisGroup = groups.find((x) => x.id == openGroupId);
         const value = $(this).prop('checked');
         _thisGroup.allow_self_responses = value;
+        await editGroup(openGroupId, false, false);
+    }
+}
+
+async function onGroupTurnIsolationClick() {
+    if (openGroupId) {
+        let _thisGroup = groups.find((x) => x.id == openGroupId);
+        const value = $(this).prop('checked');
+        _thisGroup.turn_isolation = value;
         await editGroup(openGroupId, false, false);
     }
 }
@@ -1831,6 +1969,7 @@ function select_group_chats(groupId, skipAnimation) {
     const groupHasMembers = !!$('#rm_group_members').children().length;
     $('#rm_group_submit').prop('disabled', !groupHasMembers);
     $('#rm_group_allow_self_responses').prop('checked', group && group.allow_self_responses);
+    $('#rm_group_turn_isolation').prop('checked', group && group.turn_isolation);
     $('#rm_group_hidemutedsprites').prop('checked', group && group.hideMutedSprites);
     $('#rm_group_automode_delay').val(group?.auto_mode_delay ?? DEFAULT_AUTO_MODE_DELAY);
 
@@ -1843,6 +1982,7 @@ function select_group_chats(groupId, skipAnimation) {
         $('#rm_group_submit').hide();
         $('#rm_group_delete').show();
         $('#rm_group_scenario').show();
+        $('#rm_group_export_config').show();
         $('#group-metadata-controls .chat_lorebook_button').removeClass('disabled').prop('disabled', false);
         $('#group_open_media_overrides').show();
         const isMediaAllowed = isExternalMediaAllowed();
@@ -1855,6 +1995,7 @@ function select_group_chats(groupId, skipAnimation) {
         }
         $('#rm_group_delete').hide();
         $('#rm_group_scenario').hide();
+        $('#rm_group_export_config').hide();
         $('#group-metadata-controls .chat_lorebook_button').addClass('disabled').prop('disabled', true);
         $('#group_open_media_overrides').hide();
     }
@@ -2084,6 +2225,7 @@ function filterGroupMemberList() {
 async function createGroup() {
     let name = $('#rm_group_chat_name').val().toString();
     let allowSelfResponses = !!$('#rm_group_allow_self_responses').prop('checked');
+    let turnIsolation = !!$('#rm_group_turn_isolation').prop('checked');
     let activationStrategy = Number($('#rm_group_activation_strategy').find(':selected').val()) ?? group_activation_strategy.NATURAL;
     let generationMode = Number($('#rm_group_generation_mode').find(':selected').val()) ?? group_generation_mode.SWAP;
     let autoModeDelay = Number($('#rm_group_automode_delay').val()) ?? DEFAULT_AUTO_MODE_DELAY;
@@ -2098,12 +2240,23 @@ async function createGroup() {
     const chatName = humanizedDateTime();
     const chats = [chatName];
 
+    // Multichat: require 2-8 members (1 = a regular single-character chat)
+    if (members.length < 2) {
+        toastr.warning(t`Add at least 2 characters to start a multi-character chat.`);
+        return;
+    }
+    if (members.length > 8) {
+        toastr.warning(t`A multi-character chat supports at most 8 characters. Remove some to continue.`);
+        return;
+    }
+
     /** @type {Omit<Group, 'id'>} */
     const groupCreateModel = {
         name: name,
         members: members,
         avatar_url: isValidImageUrl(avatarUrl) ? avatarUrl : default_avatar,
         allow_self_responses: allowSelfResponses,
+        turn_isolation: turnIsolation,
         hideMutedSprites: hideMutedSprites,
         activation_strategy: activationStrategy,
         generation_mode: generationMode,
@@ -2112,6 +2265,9 @@ async function createGroup() {
         chat_id: chatName,
         chats: chats,
         auto_mode_delay: autoModeDelay,
+        member_profiles: {},
+        strict_rotation_cursor: 0,
+        turn_isolation: turnIsolation,
     };
 
     const createGroupResponse = await fetch('/api/groups/create', {
@@ -2477,6 +2633,7 @@ jQuery(() => {
     $('#rm_group_delete').off().on('click', onDeleteGroupClick);
     $('#group_favorite_button').on('click', onFavoriteGroupClick);
     $('#rm_group_allow_self_responses').on('input', onGroupSelfResponsesClick);
+    $('#rm_group_turn_isolation').on('input', onGroupTurnIsolationClick);
     $('#rm_group_activation_strategy').on('change', onGroupActivationStrategyInput);
     $('#rm_group_generation_mode').on('change', onGroupGenerationModeInput);
     $('#rm_group_automode_delay').on('input', onGroupAutoModeDelayInput);
@@ -2485,4 +2642,85 @@ jQuery(() => {
     $('#group_avatar_button').on('input', uploadGroupAvatar);
     $('#rm_group_restore_avatar').on('click', restoreGroupAvatar);
     $(document).on('click', '.group_member .right_menu_button', onGroupActionClick);
+
+    // Per-character connection: save the selected profile for a member
+    $(document).on('change', '.group_member_profile_select', function () {
+        if (!openGroupId) {
+            return;
+        }
+        const group = groups.find((x) => x.id == openGroupId);
+        if (!group) {
+            return;
+        }
+        if (!group.member_profiles || typeof group.member_profiles !== 'object') {
+            group.member_profiles = {};
+        }
+        const avatar = String($(this).attr('data-avatar'));
+        const profileId = String($(this).val() ?? '');
+        if (profileId) {
+            group.member_profiles[avatar] = profileId;
+        } else {
+            delete group.member_profiles[avatar];
+        }
+        editGroup(openGroupId, false, false);
+    });
+
+    $('#rm_group_export_config').on('click', onExportGroupConfigClick);
 });
+
+/**
+ * Exports the multi-character chat config (members, per-member connections,
+ * reply strategy) together with the current transcript as a single JSON file.
+ * @returns {Promise<void>}
+ */
+async function onExportGroupConfigClick() {
+    if (!selected_group) {
+        toastr.warning(t`No group is currently selected.`);
+        return;
+    }
+    const group = groups.find((x) => x.id === selected_group);
+    if (!group) {
+        return;
+    }
+
+    await saveChatConditional();
+
+    // Build a readable members list with each member's bound connection name
+    const members = (group.members ?? []).map(avatar => {
+        const character = characters.find(x => x.avatar === avatar);
+        const profileId = group.member_profiles?.[avatar];
+        const profile = profileId ? getConnectionProfile(profileId) : null;
+        return {
+            name: character?.name ?? avatar,
+            avatar: avatar,
+            enabled: !(group.disabled_members ?? []).includes(avatar),
+            connection_profile: profile ? profile.name : null,
+        };
+    });
+
+    const exportObject = {
+        type: 'multichat_config',
+        version: 1,
+        exported_at: new Date().toISOString(),
+        group: {
+            id: group.id,
+            name: group.name,
+            activation_strategy: group.activation_strategy,
+            generation_mode: group.generation_mode,
+            allow_self_responses: group.allow_self_responses,
+            strict_rotation_cursor: group.strict_rotation_cursor ?? 0,
+        },
+        members,
+        chat: chat.map(m => ({
+            name: m.is_user ? (m.name || 'User') : m.name,
+            is_user: !!m.is_user,
+            is_system: !!m.is_system,
+            send_date: m.send_date,
+            mes: m.mes,
+        })),
+    };
+
+    const fileName = `${(group.name || 'multichat').replace(/[^\w\u4e00-\u9fa5\- ]+/g, '_')}_config.json`;
+    download(JSON.stringify(exportObject, null, 2), fileName, 'application/json');
+    toastr.success(t`Multi-character chat config exported.`);
+}
