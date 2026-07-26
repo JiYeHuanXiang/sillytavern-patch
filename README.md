@@ -6,6 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
 [![Version](https://img.shields.io/badge/version-1.18.0--patch--1-brightgreen.svg)](CHANGELOG.md)
+[![Android Client](https://img.shields.io/badge/Android%20Client-ST--patch--android-3DDC84.svg?logo=android&logoColor=white)](https://github.com/JiYeHuanXiang/ST-patch-android)
 
 A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/SillyTavern) with targeted improvements for **Chinese domestic LLMs** and **large character card collections**.
 
