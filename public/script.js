@@ -4619,6 +4619,26 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
     const canUseTools = ToolManager.isToolCallingSupported();
     const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && depth < ToolManager.RECURSE_LIMIT;
     let coreChat = chat.filter(x => !x.is_system || (canUseTools && Array.isArray(x.extra?.tool_invocations)));
+
+    // Multichat dialogue isolation: when enabled on the group, the current character
+    // only sees the user's messages and its own past messages (not other members' lines).
+    // A group message is identified by its original_avatar (the character's avatar id).
+    if (selected_group && this_chid !== undefined) {
+        const _isoGroup = groups.find((x) => x.id === selected_group);
+        if (_isoGroup && _isoGroup.turn_isolation) {
+            const _currentAvatar = characters[this_chid]?.avatar;
+            const _currentName = characters[this_chid]?.name;
+            if (_currentAvatar) {
+                coreChat = coreChat.filter(x =>
+                    x.is_user ||
+                    x.is_system ||
+                    x.original_avatar === _currentAvatar ||
+                    // Fallback for legacy messages without original_avatar: match by name
+                    (!x.original_avatar && typeof x.name === 'string' && _currentName && x.name === _currentName)
+                );
+            }
+        }
+    }
     if (type === 'swipe') {
         coreChat.pop();
     }
