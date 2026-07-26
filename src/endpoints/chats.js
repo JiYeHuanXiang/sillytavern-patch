@@ -322,10 +322,24 @@ async function checkChatIntegrity(filePath, integritySlug) {
 
     // Parse the first line of the chat file as JSON
     const firstLine = await readFirstLine(filePath);
+
+    // If the file is empty, allow the save
+    if (!firstLine) {
+        return true;
+    }
+
     const jsonData = tryParse(firstLine);
+
+    // If the first line exists but can't be parsed, the file may be corrupted.
+    // Refuse the save to prevent silent data loss and let the user decide.
+    if (!jsonData) {
+        console.warn(`File "${filePath}" first line could not be parsed as JSON. Integrity check failed for slug "${integritySlug}".`);
+        return false;
+    }
+
     const chatIntegrity = jsonData?.chat_metadata?.integrity;
 
-    // If the chat has no integrity metadata, assume it's intact
+    // If the chat has no integrity metadata, assume it's an old format file being upgraded
     if (!chatIntegrity) {
         console.debug(`File "${filePath}" does not have integrity metadata matching "${integritySlug}". The integrity validation has been skipped.`);
         return true;
