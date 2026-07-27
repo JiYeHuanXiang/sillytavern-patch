@@ -136,7 +136,7 @@ sillytavern-patch/
 ## ⚠️ Known Limitations & Notes
 
 - **Not an official fork**: This repo does not guarantee synchronization with upstream nor compatibility with all upstream extensions and plugins.
-- **Removed extensions**: caption, gallery, stable-diffusion, translate, tts, and their backend endpoints have been deleted. Users who depend on these features should use the upstream version.
+- **Removed extensions**: caption, gallery, translate, and their backend endpoints have been deleted. Users who depend on these features should use the upstream version.
 - **Limited model coverage**: The thinking mode toggle is primarily validated against DeepSeek. Other domestic models (e.g., Qwen) are adapted on an as-needed basis without comprehensive regression testing.
 - **Security**: By default, only localhost is listened on. If you need external access, make sure to configure `listen`, the whitelist, CSRF protection, and Basic Auth, and assess the risks.
 
