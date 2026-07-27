@@ -4,6 +4,40 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-pre2] - 2026-07-27
+
+第二个预览版本。在 1.1 基础上新增群聊增强、TTS/Stable Diffusion 扩展恢复、角色导出等功能，并同步上游多项修复。
+
+### ✨ 新增
+
+- **群聊定向发送与消息可见性**：群聊中支持定向发送消息（directed send）及按角色控制消息可见性，提升多人角色扮演的灵活度。
+- **TTS 与 Stable Diffusion 扩展**：恢复 TTS（文字转语音）和 Stable Diffusion（AI 绘图）扩展支持，含对应后端端点。
+- **角色卡批量导出**：支持将角色卡批量导出为 ZIP 压缩包。
+- **正则扩展功能完善**：完善正则脚本扩展的文档与交互体验。
+
+### 🌐 国际化
+
+- **中文翻译**：为收件人选择（recipient selection）和多视角导出（multi-perspective export）界面添加中文翻译。
+
+### 🐛 修复（上游同步）
+
+- **macros**：修复管道符/过滤器导致宏中断的问题；修复 `{{//}}...{{///}}` 作用域注释宏未移除内容的问题；修复变量宏尾部空白字符问题；新增数组和对象按索引/键访问元素支持。
+- **reasoning**：修复纯空白推理块控件显示问题；修复推理/工具调用边界情况。
+- **world-info**：修复世界书重命名后 persona lore 未同步更新及聊天绑定 lore 名称过期问题。
+- **markdown**：修复相同分隔符嵌套强调渲染问题。
+- **chats**：修复聊天文件首行不可解析时静默重置的问题。
+- **expressions**：补充缺失的 `default-expressions/null.png`。
+- **novelai**：将用户订阅状态 API 调用切换至 `image.novelai.net`。
+
+### 🔨 构建
+
+- **Docker**：移除预构建镜像，改为本地构建。
+
+### 📝 文档
+
+- **README 中英双语**：README 翻译为英文并添加双语链接。
+- 调整 README 目录结构。
+
 ## [1.18.0-patch-1.1] - 2026-07-24
 
 恢复正则扩展功能，并增强不规范角色卡的正则脚本防护。
