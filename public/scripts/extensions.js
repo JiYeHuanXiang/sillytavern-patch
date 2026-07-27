@@ -182,6 +182,12 @@ export const extension_settings = {
     preset_allowed_regex: {},
     /** @type {boolean} */
     regexValidationEnabled: true,
+    tts: {},
+    sd: {
+        prompts: {},
+        character_prompts: {},
+        character_negative_prompts: {},
+    },
     chromadb: {},
     objective: {},
     quickReply: {},

@@ -31,9 +31,11 @@ import { router as contentManagerRouter } from './endpoints/content-manager.js';
 import { router as settingsRouter } from './endpoints/settings.js';
 import { router as backgroundsRouter } from './endpoints/backgrounds.js';
 import { router as spritesRouter } from './endpoints/sprites.js';
+import { router as stableDiffusionRouter } from './endpoints/stable-diffusion.js';
 import { router as hordeRouter } from './endpoints/horde.js';
 import { router as vectorsRouter } from './endpoints/vectors.js';
 import { router as classifyRouter } from './endpoints/classify.js';
+import { router as speechRouter } from './endpoints/speech.js';
 import { router as searchRouter } from './endpoints/search.js';
 import { router as openRouterRouter } from './endpoints/openrouter.js';
 import { router as nanogptRouter } from './endpoints/nanogpt.js';
@@ -155,6 +157,7 @@ export function setupPrivateEndpoints(app) {
     app.use('/api/stats', statsRouter);
     app.use('/api/backgrounds', backgroundsRouter);
     app.use('/api/sprites', spritesRouter);
+    app.use('/api/sd', stableDiffusionRouter);
     app.use('/api/content', contentManagerRouter);
     app.use('/api/settings', settingsRouter);
     app.use('/api/horde', hordeRouter);
@@ -166,6 +169,7 @@ export function setupPrivateEndpoints(app) {
     app.use('/api/nanogpt', nanogptRouter);
     app.use('/api/backends/kobold', koboldRouter);
     app.use('/api/backends/chat-completions', chatCompletionsRouter);
+    app.use('/api/speech', speechRouter);
     app.use('/api/data-maid', dataMaidRouter);
     app.use('/api/backups', backupsRouter);
     app.use('/api/image-metadata', imageMetadataRouter);

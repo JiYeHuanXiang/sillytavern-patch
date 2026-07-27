@@ -5767,6 +5767,8 @@
                         <div id="assets_container" class="extension_container"></div>
                         <div id="typing_indicator_container" class="extension_container"></div>
                         <div id="expressions_container" class="extension_container"></div>
+                        <div id="sd_container" class="extension_container"></div>
+                        <div id="tts_container" class="extension_container"></div>
                         <div id="rvc_container" class="extension_container"></div>
                         <div id="stt_container" class="extension_container"></div>
                         <div id="audio_container" class="extension_container"></div>
@@ -7410,10 +7412,12 @@
                         <div class="mes_buttons">
                             <div title="Message Actions" class="mes_button extraMesButtonsHint fa-solid fa-ellipsis" data-i18n="[title]Message Actions"></div>
                             <div class="extraMesButtons">
+                                <div title="Generate Image" class="mes_button sd_message_gen fa-solid fa-paintbrush" data-i18n="[title]Generate Image"></div>
                                 <div title="Narrate" class="mes_button mes_narrate fa-solid fa-bullhorn" data-i18n="[title]Narrate"></div>
                                 <div title="Prompt" class="mes_button mes_prompt fa-solid fa-square-poll-horizontal " data-i18n="[title]Prompt" style="display: none;"></div>
                                 <div title="Exclude message from prompts" class="mes_button mes_hide fa-solid fa-eye" data-i18n="[title]Exclude message from prompts"></div>
                                 <div title="Include message in prompts" class="mes_button mes_unhide fa-solid fa-eye-slash" data-i18n="[title]Include message in prompts"></div>
+                                <div title="Manage per-character visibility" class="mes_button mes_visibility fa-solid fa-user-shield" data-i18n="[title]Manage per-character visibility"></div>
                                 <div title="Toggle media display style" class="mes_button mes_media_gallery fa-solid fa-photo-film" data-i18n="[title]Toggle media display style"></div>
                                 <div title="Toggle media display style" class="mes_button mes_media_list fa-solid fa-table-cells-large" data-i18n="[title]Toggle media display style"></div>
                                 <div title="Embed file or image" class="mes_button mes_embed fa-solid fa-paperclip" data-i18n="[title]Embed file or image"></div>
@@ -8096,6 +8100,7 @@
                 <div id="nonQRFormItems">
                     <div id="leftSendForm" class="alignContentCenter">
                         <div id="options_button" class="fa-solid fa-bars interactable"></div>
+                        <div id="directed_send_button" class="fa-solid fa-bullseye interactable displayNone" title="Choose recipients" data-i18n="[title]Choose recipients"></div>
                     </div>
                     <textarea id="send_textarea" name="text" class="mdHotkeys" data-i18n="[no_connection_text]Not connected to API!;[connected_text]Type a message, or /? for help" placeholder="Not connected to API!" no_connection_text="Not connected to API!" connected_text="Type a message, or /? for help" autocomplete="off"></textarea>
                     <div id="rightSendForm" class="alignContentCenter">
@@ -8183,6 +8188,10 @@
             <a id="option_continue" title="Continue the last message" data-i18n="[title]Continue the last message">
                 <i class="fa-lg fa-solid fa-arrow-right"></i>
                 <span data-i18n="Continue">Continue</span>
+            </a>
+            <a id="option_perspective_export" class="displayNone">
+                <i class="fa-lg fa-solid fa-eye"></i>
+                <span data-i18n="Export from POV">Export from POV</span>
             </a>
         </div>
     </div>

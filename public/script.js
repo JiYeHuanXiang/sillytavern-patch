@@ -73,6 +73,9 @@ import {
     getGroupBlock,
     getGroupCharacterCardsLazy,
     getGroupDepthPrompts,
+    applyDirectedSendToLastMessage,
+    showMessageVisibilityPopup,
+    updateMessageHiddenBadge,
 } from './scripts/group-chats.js';
 
 import {
@@ -1759,10 +1762,17 @@ export function cancelDebouncedChatSave() {
  * @param {object} [options] Options
  * @param {boolean} [options.clearData=false] Optionally clear the chat array's contents.
  */
+export function cancelTtsPlay() {
+    if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+    }
+}
+
 export async function clearChat({ clearData = false } = {}) {
     cancelDebouncedChatSave();
     cancelDebouncedMetadataSave();
     closeMessageEditor();
+    cancelTtsPlay();
     extension_prompts = {};
     if (is_delete_mode) {
         $('#dialogue_del_mes_cancel').trigger('click');
@@ -4576,10 +4586,21 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
             sendSystemMessage(system_message_types.GENERIC, ' ', { bias: messageBias });
         } else {
             await sendMessageAsUser(textareaText, messageBias);
+            // Directed send: stamp hidden_from on the just-created user message
+            if (selected_group) {
+                applyDirectedSendToLastMessage();
+                const lastMesId = chat.length - 1;
+                if (chat.length > 0) updateMessageHiddenBadge(lastMesId);
+            }
         }
     } else if (textareaText == '' && !automatic_trigger && !dryRun && [undefined, 'normal'].includes(type) && main_api == 'openai' && oai_settings.send_if_empty.trim().length > 0 && !depth) {
         // Use send_if_empty if set and the user message is empty. Only when sending messages normally
         await sendMessageAsUser(oai_settings.send_if_empty.trim(), messageBias);
+        if (selected_group) {
+            applyDirectedSendToLastMessage();
+            const lastMesId = chat.length - 1;
+            if (chat.length > 0) updateMessageHiddenBadge(lastMesId);
+        }
     }
 
     let {
@@ -4637,6 +4658,12 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
                     (!x.original_avatar && typeof x.name === 'string' && _currentName && x.name === _currentName)
                 );
             }
+        }
+        // Per-character message hiding: drop messages explicitly hidden from the
+        // currently-generating character by their hidden_from avatar list.
+        const _currentAvatar = characters[this_chid]?.avatar;
+        if (_currentAvatar) {
+            coreChat = coreChat.filter(x => !Array.isArray(x?.extra?.hidden_from) || !x.extra.hidden_from.includes(_currentAvatar));
         }
     }
     if (type === 'swipe') {
