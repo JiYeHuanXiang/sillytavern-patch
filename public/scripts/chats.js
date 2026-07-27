@@ -29,7 +29,7 @@ import {
     getMediaDisplay,
     chatElement,
 } from '../script.js';
-import { selected_group } from './group-chats.js';
+import { selected_group, showMessageVisibilityPopup } from './group-chats.js';
 import { power_user } from './power-user.js';
 import {
     extractTextFromHTML,
@@ -2117,6 +2117,12 @@ export function initChatUtilities() {
         const messageBlock = $(this).closest('.mes');
         const messageId = Number(messageBlock.attr('mesid'));
         await hideChatMessageRange(messageId, messageId, true);
+    });
+
+    $(document).on('click', '.mes_visibility', async function () {
+        const messageBlock = $(this).closest('.mes');
+        const messageId = Number(messageBlock.attr('mesid'));
+        await showMessageVisibilityPopup(messageId);
     });
 
     $(document).on('click', '.mes_file_delete', async function () {

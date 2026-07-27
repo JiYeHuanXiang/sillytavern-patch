@@ -83,7 +83,7 @@ import {
 import { printTagList, createTagMapFromList, applyTagsOnCharacterSelect, tag_map, applyTagsOnGroupSelect, printTagFilters, tag_filter_type } from './tags.js';
 import { FILTER_TYPES, FilterHelper } from './filters.js';
 import { isExternalMediaAllowed } from './chats.js';
-import { POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
+import { POPUP_TYPE, POPUP_RESULT, Popup, callGenericPopup } from './popup.js';
 import { t } from './i18n.js';
 import { accountStorage } from './util/AccountStorage.js';
 import { compressRequest } from './request-compression.js';
@@ -120,6 +120,18 @@ let group_generation_id = null;
 let fav_grp_checked = false;
 let openGroupId = null;
 let newGroupMembers = [];
+
+// === Directed send (per-recipient targeting) state ===
+/** @type {Set<string>} Set of member avatar IDs targeted by directed send. Empty = off (send to all). */
+let directedSendTargets = new Set();
+/** When true, the directed selection persists across sends. When false, cleared after one send. */
+let directedSendLock = false;
+/**
+ * Holds the hidden_from avatar list for the user message of the current generation batch.
+ * Consumed (and cleared) by Generate() in script.js right after sendMessageAsUser.
+ * @type {string[]|null}
+ */
+let pendingDirectedSend = null;
 
 export const group_activation_strategy = {
     NATURAL: 0,
@@ -338,6 +350,13 @@ export async function getGroupChat(groupId, reload = false) {
     }
 
     updateChatMetadata(metadata, true);
+
+    // Show directed-send button when entering a group chat
+    $('#directed_send_button').removeClass('displayNone');
+    $('#option_perspective_export').removeClass('displayNone');
+    document.body.classList.add('group-chat');
+    // Refresh any per-message hidden badges for loaded messages
+    chat.forEach((_, i) => updateMessageHiddenBadge(i));
 
     if (reload) {
         select_group_chats(groupId, true);
@@ -639,6 +658,13 @@ async function getFirstCharacterMessage(character) {
 function resetSelectedGroup() {
     selected_group = null;
     is_group_generating = false;
+    // Hide directed-send button + clear state when leaving a group chat
+    $('#directed_send_button').addClass('displayNone');
+    $('#option_perspective_export').addClass('displayNone');
+    document.body.classList.remove('group-chat');
+    directedSendTargets = new Set();
+    directedSendLock = false;
+    pendingDirectedSend = null;
 }
 
 /**
@@ -1076,6 +1102,22 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
             activatedMembers = nextChId !== -1 ? [nextChId] : [];
         }
 
+        // Directed send: if the user selected specific recipients, override activation so
+        // only those (enabled, existing) members reply, and mark non-recipients as hidden
+        // from the user message that Generate() is about to create.
+        if (isUserInput && directedSendTargets.size > 0) {
+            const targetedChIds = [...directedSendTargets]
+                .filter(av => enabledMembers.includes(av))
+                .map(av => characters.findIndex(c => c.avatar === av))
+                .filter(id => id !== -1);
+
+            if (targetedChIds.length > 0) {
+                activatedMembers = targetedChIds;
+                // Everyone not targeted will be hidden from the outgoing user message.
+                pendingDirectedSend = group.members.filter(av => !directedSendTargets.has(av));
+            }
+        }
+
         if (activatedMembers.length === 0) {
             //toastr.warning('All group members are disabled. Enable at least one to get a reply.');
 
@@ -1158,6 +1200,12 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
         setCharacterName('');
         activateSendButtons();
         showSwipeButtons();
+        // One-shot directed send: clear the selection after the batch completes unless locked.
+        if (!directedSendLock) {
+            directedSendTargets = new Set();
+            updateDirectedSendButton();
+        }
+        pendingDirectedSend = null;
         await eventSource.emit(event_types.GROUP_WRAPPER_FINISHED, { selected_group, type });
     }
 
@@ -2666,6 +2714,16 @@ jQuery(() => {
     });
 
     $('#rm_group_export_config').on('click', onExportGroupConfigClick);
+
+    // Directed send button
+    $('#directed_send_button').on('click', showDirectedSendPopup);
+
+    // Keep per-character hidden badges in sync as messages render
+    eventSource.on(event_types.USER_MESSAGE_RENDERED, (mesId) => updateMessageHiddenBadge(mesId));
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (mesId) => updateMessageHiddenBadge(mesId));
+
+    // Perspective export (group chats only)
+    $('#option_perspective_export').on('click', showPerspectiveExportPopup);
 });
 
 /**
@@ -2723,4 +2781,302 @@ async function onExportGroupConfigClick() {
     const fileName = `${(group.name || 'multichat').replace(/[^\w\u4e00-\u9fa5\- ]+/g, '_')}_config.json`;
     download(JSON.stringify(exportObject, null, 2), fileName, 'application/json');
     toastr.success(t`Multi-character chat config exported.`);
+}
+
+// ============================================================
+// Directed send & per-character message visibility
+// ============================================================
+
+/** Builds the member list HTML for a directed-send / visibility popup. */
+function buildMemberPickerItems(avatars, selectedSet) {
+    const container = $('<div class="directed-send-member-list flex-container flexFlowColumn flexGap5"></div>');
+    for (const avatar of avatars) {
+        const character = characters.find(x => x.avatar === avatar);
+        if (!character) continue;
+        const thumb = character.avatar !== 'none' ? getThumbnailUrl('avatar', character.avatar) : default_avatar;
+        const checked = selectedSet.has(avatar);
+        const row = $(`
+            <label class="directed-send-member flex-container alignItemscenter flexGap5" data-avatar="${character.avatar}">
+                <input type="checkbox" ${checked ? 'checked' : ''} />
+                <div class="avatar ui-avatar"><img src="${thumb}" /></div>
+                <span class="directed-send-member-name">${character.name}</span>
+            </label>`);
+        container.append(row);
+    }
+    return container;
+}
+
+/** Reads checked avatar IDs from a member-picker element. @returns {Set<string>} */
+function readMemberPicker(container) {
+    const set = new Set();
+    container.find('.directed-send-member').each(function () {
+        if ($(this).find('input').prop('checked')) {
+            set.add(String($(this).attr('data-avatar')));
+        }
+    });
+    return set;
+}
+
+/** Refresh the button's active highlight + tooltip based on current state. */
+function updateDirectedSendButton() {
+    const $btn = $('#directed_send_button');
+    const active = directedSendTargets.size > 0;
+    $btn.toggleClass('active', active);
+    if (active) {
+        const names = [...directedSendTargets]
+            .map(av => characters.find(c => c.avatar === av)?.name)
+            .filter(Boolean);
+        const tip = directedSendLock
+            ? t`Locked recipients: ${names.join(', ')}`
+            : t`One-time recipients: ${names.join(', ')}`;
+        $btn.attr('title', tip);
+    } else {
+        $btn.attr('title', t`Choose recipients`);
+    }
+}
+
+/** Show the directed-send popup: pick recipients + toggle lock mode. */
+async function showDirectedSendPopup() {
+    const group = groups.find(x => x.id === selected_group);
+    if (!group || !Array.isArray(group.members) || group.members.length === 0) {
+        toastr.warning(t`No group members available.`);
+        return;
+    }
+
+    const memberList = buildMemberPickerItems(group.members, directedSendTargets);
+
+    const wrapper = $('<div class="flex-container flexFlowColumn flexGap10"></div>');
+    wrapper.append(`<div class="directed-send-hint">${t`Select which members receive your next message. Unselected members won't see it.`}</div>`);
+    wrapper.append(memberList);
+
+    const lockLabel = $(`<label class="checkbox_label flex-container alignItemscenter flexGap5">
+        <input type="checkbox" id="directed_send_lock" ${directedSendLock ? 'checked' : ''} />
+        <span>${t`Keep selection until I cancel (lock mode)`}</span>
+    </label>`);
+    wrapper.append(lockLabel);
+
+    const clearBtn = $(`<div class="menu_button margin0">${t`Clear selection`}</div>`);
+    wrapper.append(clearBtn);
+
+    const result = await callGenericPopup(wrapper, POPUP_TYPE.CONFIRM, '', {
+        okButton: t`Apply`,
+        cancelButton: t`Cancel`,
+        wide: true,
+    });
+
+    if (result !== POPUP_RESULT.AFFIRMATIVE) {
+        return;
+    }
+
+    const selected = readMemberPicker(memberList);
+    directedSendLock = !!$('#directed_send_lock').prop('checked');
+
+    // Clear-selection button: if clicked, wipe the state.
+    if (selected.size === 0) {
+        directedSendTargets = new Set();
+        directedSendLock = false;
+        updateDirectedSendButton();
+        return;
+    }
+
+    directedSendTargets = selected;
+    updateDirectedSendButton();
+}
+
+/** Called by script.js after it sends the user message; writes hidden_from + clears the pending value. @returns {boolean} */
+export function applyDirectedSendToLastMessage() {
+    if (!pendingDirectedSend || pendingDirectedSend.length === 0) {
+        return false;
+    }
+    const lastMessage = chat[chat.length - 1];
+    if (lastMessage && lastMessage.is_user) {
+        if (!lastMessage.extra || typeof lastMessage.extra !== 'object') {
+            lastMessage.extra = {};
+        }
+        // Merge with any pre-existing hidden_from (avoid duplicates).
+        const existing = Array.isArray(lastMessage.extra.hidden_from) ? lastMessage.extra.hidden_from : [];
+        lastMessage.extra.hidden_from = [...new Set([...existing, ...pendingDirectedSend])];
+    }
+    pendingDirectedSend = null;
+    return true;
+}
+
+/** Show the per-character visibility popup for a specific message. */
+export async function showMessageVisibilityPopup(messageId) {
+    const group = groups.find(x => x.id === selected_group);
+    if (!group || !Array.isArray(group.members) || group.members.length === 0) {
+        toastr.warning(t`No group members available.`);
+        return;
+    }
+
+    const message = chat[messageId];
+    if (!message) return;
+    if (!message.extra || typeof message.extra !== 'object') {
+        message.extra = {};
+    }
+    const currentHidden = new Set(Array.isArray(message.extra.hidden_from) ? message.extra.hidden_from : []);
+
+    const memberList = buildMemberPickerItems(group.members, new Set(currentHidden));
+
+    const wrapper = $('<div class="flex-container flexFlowColumn flexGap10"></div>');
+    wrapper.append(`<div class="directed-send-hint">${t`Check members who should NOT see this message. Unchecked members see it normally.`}</div>`);
+    wrapper.append(memberList);
+
+    const result = await callGenericPopup(wrapper, POPUP_TYPE.CONFIRM, '', {
+        okButton: t`Apply`,
+        cancelButton: t`Cancel`,
+        wide: true,
+    });
+
+    if (result !== POPUP_RESULT.AFFIRMATIVE) {
+        return;
+    }
+
+    const hidden = readMemberPicker(memberList);
+    message.extra.hidden_from = [...hidden];
+    await saveChatConditional();
+    updateMessageHiddenBadge(messageId);
+}
+
+/** Toggle the visibility indicator badge on a message element. */
+export function updateMessageHiddenBadge(messageId) {
+    const message = chat[messageId];
+    const $mes = chatElement.find(`.mes[mesid="${messageId}"]`);
+    if (!$mes.length) return;
+    const hidden = Array.isArray(message?.extra?.hidden_from) ? message.extra.hidden_from : [];
+    let $badge = $mes.find('.mes_hidden_badge');
+    if (hidden.length === 0) {
+        $badge.remove();
+        return;
+    }
+    if (!$badge.length) {
+        $badge = $(`<i class="mes_hidden_badge fa-solid fa-user-slash" title=""></i>`);
+        $mes.find('.ch_name .name_text').after($badge);
+    }
+    const names = hidden.map(av => characters.find(c => c.avatar === av)?.name).filter(Boolean);
+    $badge.attr('title', t`Hidden from: ${names.join(', ')}`).css('display', '');
+}
+
+/**
+ * Returns the messages visible to a given group member (excludes messages whose
+ * extra.hidden_from contains the member's avatar), respecting turn_isolation too.
+ * @param {string} memberAvatar Avatar id of the viewing member
+ * @returns {ChatMessage[]} Filtered message list
+ */
+function getVisibleMessagesFor(memberAvatar) {
+    const group = groups.find(x => x.id === selected_group);
+    if (!group) return chat.slice();
+    return chat.filter(msg => {
+        // System messages are always visible
+        if (msg.is_system) return true;
+        // Per-character hiding
+        if (Array.isArray(msg?.extra?.hidden_from) && msg.extra.hidden_from.includes(memberAvatar)) {
+            return false;
+        }
+        // Turn isolation: a member only sees user messages + its own messages
+        if (group.turn_isolation) {
+            if (msg.is_user) return true;
+            // Match by original_avatar (preferred) or name (legacy fallback)
+            if (msg.original_avatar === memberAvatar) return true;
+            const character = characters.find(c => c.avatar === memberAvatar);
+            if (character && !msg.original_avatar && msg.name === character.name) return true;
+            return false;
+        }
+        return true;
+    });
+}
+
+/** Converts a filtered message list into a readable text transcript.
+ * @param {ChatMessage[]} messages
+ * @returns {string} */
+function messagesToTextTranscript(messages) {
+    const lines = [];
+    for (const msg of messages) {
+        if (msg.is_system || !msg.mes) continue;
+        const speaker = msg.name || (msg.is_user ? 'User' : 'Character');
+        lines.push(`${speaker}: ${msg.mes}`);
+    }
+    return lines.join('\n\n');
+}
+
+/** Show the perspective-export popup: pick a member, download their POV transcript. */
+async function showPerspectiveExportPopup() {
+    const group = groups.find(x => x.id === selected_group);
+    if (!group || !Array.isArray(group.members) || group.members.length === 0) {
+        toastr.warning(t`No group members available.`);
+        return;
+    }
+
+    // Build a picker: each member is a clickable row
+    const wrapper = $('<div class="flex-container flexFlowColumn flexGap10"></div>');
+    wrapper.append(`<div class="directed-send-hint">${t`Click a member to export their visible chat. Or use "Export all" to download every perspective in one file.`}</div>`);
+
+    const list = $('<div class="directed-send-member-list flex-container flexFlowColumn flexGap5"></div>');
+    for (const avatar of group.members) {
+        const character = characters.find(x => x.avatar === avatar);
+        if (!character) continue;
+        const thumb = character.avatar !== 'none' ? getThumbnailUrl('avatar', character.avatar) : default_avatar;
+        const visibleCount = getVisibleMessagesFor(avatar).filter(m => !m.is_system && m.mes).length;
+        const row = $(`
+            <div class="directed-send-member flex-container alignItemscenter flexGap5 perspective-export-row" data-avatar="${character.avatar}">
+                <div class="avatar ui-avatar"><img src="${thumb}" /></div>
+                <span class="directed-send-member-name">${character.name}</span>
+                <span class="perspective-export-count" style="margin-left:auto;opacity:0.7;font-size:0.85em;">${visibleCount} ${t`msgs`}</span>
+            </div>`);
+        list.append(row);
+    }
+    wrapper.append(list);
+
+    // Custom buttons: one per member (closes popup on click) + Export all + Cancel
+    /** @type {CustomPopupButton[]} */
+    const memberButtons = group.members.map((avatar, index) => {
+        const character = characters.find(x => x.avatar === avatar);
+        if (!character) return null;
+        // result values start at 100 to avoid colliding with POPUP_RESULT (0,1,-1)
+        return { text: character.name, result: 100 + index };
+    }).filter(Boolean);
+
+    const result = await callGenericPopup(wrapper, POPUP_TYPE.CONFIRM, '', {
+        okButton: t`Export all`,
+        cancelButton: t`Cancel`,
+        wide: true,
+        customButtons: memberButtons,
+    });
+
+    // Export all (AFFIRMATIVE)
+    if (result === POPUP_RESULT.AFFIRMATIVE) {
+        const sections = [];
+        sections.push(`# ${t`Multi-perspective chat export`}: ${group.name || 'Group'}`);
+        sections.push(`# ${t`Generated`}: ${new Date().toISOString()}`);
+        sections.push('');
+
+        for (const avatar of group.members) {
+            const character = characters.find(x => x.avatar === avatar);
+            if (!character) continue;
+            const messages = getVisibleMessagesFor(avatar);
+            sections.push(`\n${'='.repeat(60)}\n${t`Perspective of`}: ${character.name}\n${t`Visible messages`}: ${messages.filter(m => !m.is_system && m.mes).length}\n${'='.repeat(60)}\n`);
+            sections.push(messagesToTextTranscript(messages));
+        }
+
+        const text = sections.join('\n');
+        const fileName = `${(group.name || 'multichat').replace(/[^\w\u4e00-\u9fa5\- ]+/g, '_')}_perspectives.txt`;
+        download(text, fileName, 'text/plain');
+        toastr.success(t`Exported all perspectives.`);
+        return;
+    }
+
+    // Single member export (result >= 100)
+    if (typeof result === 'number' && result >= 100) {
+        const memberIndex = result - 100;
+        const avatar = group.members[memberIndex];
+        const character = characters.find(x => x.avatar === avatar);
+        if (character) {
+            const messages = getVisibleMessagesFor(avatar);
+            const text = messagesToTextTranscript(messages);
+            const fileName = `${group.name || 'multichat'}_${character.name}_POV.txt`;
+            download(text, fileName, 'text/plain');
+            toastr.success(t`Exported ${character.name}'s perspective (${messages.filter(m => !m.is_system && m.mes).length} messages).`);
+        }
+        return;
+    }
 }

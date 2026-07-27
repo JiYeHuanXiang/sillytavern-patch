@@ -125,6 +125,8 @@ declare global {
         negative?: string;
         /** Will exclude this message from prompt processing */
         [IGNORE_SYMBOL]?: boolean;
+        /** Avatar IDs of group members this message is hidden from (per-character visibility) */
+        hidden_from?: string[];
     }
 
     type MediaAttachment = MediaAttachmentProps & ImageGenerationAttachmentProps & ImageCaptionAttachmentProps;
