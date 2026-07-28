@@ -2793,12 +2793,10 @@ function buildMemberPickerItems(avatars, selectedSet) {
     for (const avatar of avatars) {
         const character = characters.find(x => x.avatar === avatar);
         if (!character) continue;
-        const thumb = character.avatar !== 'none' ? getThumbnailUrl('avatar', character.avatar) : default_avatar;
         const checked = selectedSet.has(avatar);
         const row = $(`
             <label class="directed-send-member flex-container alignItemscenter flexGap5" data-avatar="${character.avatar}">
                 <input type="checkbox" ${checked ? 'checked' : ''} />
-                <div class="avatar ui-avatar"><img src="${thumb}" /></div>
                 <span class="directed-send-member-name">${character.name}</span>
             </label>`);
         container.append(row);

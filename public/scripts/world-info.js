@@ -5987,9 +5987,20 @@ export function installMobileWorldSearch(select) {
         }
     }
 
+    // Sort options so that selected (activated) worlds float to the top.
+    // Stable: within each group the original document order is preserved.
+    function getSortedOptions() {
+        const options = getOptions();
+        // Preserve the empty / placeholder option at its natural position.
+        const empty = options.filter(o => o.value === '');
+        const selected = options.filter(o => o.value !== '' && o.selected);
+        const rest = options.filter(o => o.value !== '' && !o.selected);
+        return [...empty, ...selected, ...rest];
+    }
+
     function rebuildList() {
         list.innerHTML = '';
-        for (const option of getOptions()) {
+        for (const option of getSortedOptions()) {
             list.appendChild(buildItem(option));
         }
         // Re-apply the current search filter.
