@@ -515,12 +515,22 @@ async function getClientVersion() {
         displayVersion = `SillyTavern ${data.pkgVersion}`;
         currentVersion = data.pkgVersion;
 
+        // Render "patch" as a clickable link to the patch fork's GitHub page.
+        const PATCH_REPO_URL = 'https://github.com/JiYeHuanXiang/sillytavern-patch';
+        if (data.pkgVersion && data.pkgVersion.includes('patch')) {
+            const safeVersion = data.pkgVersion.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const linked = safeVersion.replace('patch', `<a href="${PATCH_REPO_URL}" target="_blank" rel="noopener noreferrer" class="patch_version_link">patch</a>`);
+            displayVersion = `SillyTavern ${linked}`;
+        } else {
+            displayVersion = `SillyTavern ${data.pkgVersion}`;
+        }
+
         if (data.gitRevision && data.gitBranch) {
             displayVersion += ` '${data.gitBranch}' (${data.gitRevision})`;
         }
 
-        $('#version_display').text(displayVersion);
-        $('#version_display_welcome').text(displayVersion);
+        // displayVersion may contain HTML (patch link); always use .html().
+        $('#version_display').html(displayVersion);
     } catch (err) {
         console.error('Couldn\'t get client version', err);
     }

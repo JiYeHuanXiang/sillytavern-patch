@@ -6051,8 +6051,7 @@ export function installMobileWorldSearch(select) {
 
     // Keep trigger/items in sync when the underlying select changes elsewhere.
     select.on('change.mobileSearchSync', () => {
-        renderTrigger();
-        syncAllItems();
+        rebuildList();
     });
 
     renderTrigger();
@@ -6305,6 +6304,20 @@ function updateAuxBooks(fileName, computeNext) {
     saveSettingsDebounced();
 }
 
+/**
+ * Reorders the World Info select options so that selected/enabled worlds
+ * are placed at the top, directly after the empty placeholder option.
+ */
+function sortWorldInfoSelectOptions() {
+    const $select = $('#world_info');
+    const $options = $select.children('option');
+    const $empty = $options.filter('[value=""]');
+    const $selected = $options.filter('[value!=""]:selected');
+    const $rest = $options.filter('[value!=""]:not(:selected)');
+    // Re-append in desired order; detach+reattach preserves event bindings
+    $select.append($empty, $selected, $rest);
+}
+
 export function initWorldInfo() {
     $('#world_info').on('mousedown change', async function (e) {
         // If there's no world names, don't do anything
@@ -6314,6 +6327,9 @@ export function initWorldInfo() {
         }
 
         onWorldInfoChange('__notSlashCommand__');
+
+        // Re-sort options so enabled worlds stay on top in the Select2 dropdown
+        sortWorldInfoSelectOptions();
     });
 
     //**************************WORLD INFO IMPORT EXPORT*************************//
@@ -6513,6 +6529,13 @@ export function initWorldInfo() {
             placeholder: t`No Worlds active. Click here to select.`,
             allowClear: true,
             closeOnSelect: false,
+            sorter: function(data) {
+                // Sort: selected/enabled worlds first, preserving original order within each group
+                const empty = data.filter(d => d.id === '');
+                const selected = data.filter(d => d.id !== '' && d.selected);
+                const rest = data.filter(d => d.id !== '' && !d.selected);
+                return [...empty, ...selected, ...rest];
+            },
         });
 
         // Subscribe world loading to the select2 multiselect items (We need to target the specific select2 control)

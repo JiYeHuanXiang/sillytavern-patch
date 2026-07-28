@@ -842,6 +842,20 @@ hr {
     opacity: 0.8;
 }
 
+#version_display .patch_version_link,
+#version_display_welcome .patch_version_link,
+.welcomeHeaderVersionDisplay .patch_version_link {
+    color: var(--SmartThemeQuoteColor, #9ad4ff);
+    cursor: pointer;
+    text-decoration: underline dotted;
+}
+
+#version_display .patch_version_link:hover,
+#version_display_welcome .patch_version_link:hover,
+.welcomeHeaderVersionDisplay .patch_version_link:hover {
+    text-decoration: underline solid;
+}
+
 /*TOPPER margin*/
 
 #top-bar {
