@@ -309,6 +309,10 @@ export async function getFileAttachment(url) {
         });
 
         if (!result.ok) {
+            if (result.status === 404) {
+                console.warn('Attachment file not found', url);
+                return '';
+            }
             const error = await result.text();
             throw new Error(error);
         }
@@ -318,6 +322,7 @@ export async function getFileAttachment(url) {
     } catch (error) {
         toastr.error(error, t`Could not download file`);
         console.error('Could not download file', error);
+        return '';
     }
 }
 
