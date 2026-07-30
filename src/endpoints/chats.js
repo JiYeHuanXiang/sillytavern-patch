@@ -71,11 +71,12 @@ const backupFunctions = new Map();
  * @param {string} handle User handle
  * @returns {typeof backupChat} Backup function
  */
-function getBackupFunction(handle) {
-    if (!backupFunctions.has(handle)) {
-        backupFunctions.set(handle, _.throttle(backupChat, throttleInterval, { leading: true, trailing: true }));
+function getBackupFunction(handle, directory, name) {
+    const key = `${handle}:${directory}:${name}`;
+    if (!backupFunctions.has(key)) {
+        backupFunctions.set(key, _.throttle(backupChat, throttleInterval, { leading: true, trailing: true }));
     }
-    return backupFunctions.get(handle) || (() => { });
+    return backupFunctions.get(key) || (() => { });
 }
 
 /**
@@ -479,7 +480,7 @@ export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false
         throw new IntegrityMismatchError(`Chat integrity check failed for "${filePath}". The expected integrity slug was "${chatIntegritySlug}".`);
     }
     tryWriteFileSync(filePath, jsonlData);
-    getBackupFunction(handle)(backupDirectory, cardName, jsonlData);
+    getBackupFunction(handle, backupDirectory, cardName)(backupDirectory, cardName, jsonlData);
 }
 
 router.post('/save', validateAvatarUrlMiddleware, async function (request, response) {
