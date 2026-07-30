@@ -45,7 +45,16 @@ export default function initRequestProxy({ enabled, url, bypass, enableKeepAlive
         process.env.all_proxy = cleanUrl;
 
         if (Array.isArray(bypass) && bypass.length > 0) {
-            process.env.no_proxy = bypass.join(',');
+            // Convert glob-style wildcard patterns to no_proxy compatible syntax.
+            // proxy-from-env / node libraries understand leading dots as domain+subdomain.
+            const normalizedBypass = bypass.map(rule => {
+                if (typeof rule !== 'string' || !rule.includes('*')) {
+                    return rule;
+                }
+                // *.example.com  or  *example.com  ->  .example.com
+                return rule.replace(/^\*\.?/, '.');
+            });
+            process.env.no_proxy = normalizedBypass.join(',');
         }
 
         const httpAgent = http.globalAgent;
