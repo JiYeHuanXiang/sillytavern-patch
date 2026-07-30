@@ -397,12 +397,12 @@ export function getRegexedString(rawString, placement, { characterOverride, isMa
 
             // Check if the depth is within the min/max depth
             if (typeof depth === 'number') {
-                if (!isNaN(script.minDepth) && script.minDepth !== null && script.minDepth >= -1 && depth < script.minDepth) {
+                if (Number.isFinite(script.minDepth) && script.minDepth >= -1 && depth < script.minDepth) {
                     console.debug(`getRegexedString: Skipping script ${script.scriptName} because depth ${depth} is less than minDepth ${script.minDepth}`);
                     return;
                 }
 
-                if (!isNaN(script.maxDepth) && script.maxDepth !== null && script.maxDepth >= 0 && depth > script.maxDepth) {
+                if (Number.isFinite(script.maxDepth) && script.maxDepth >= 0 && depth > script.maxDepth) {
                     console.debug(`getRegexedString: Skipping script ${script.scriptName} because depth ${depth} is greater than maxDepth ${script.maxDepth}`);
                     return;
                 }
