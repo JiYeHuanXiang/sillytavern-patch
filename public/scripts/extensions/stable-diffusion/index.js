@@ -4154,6 +4154,7 @@ async function generateOpenAiImage(prompt, signal) {
             style: isDalle3 ? extension_settings.sd.openai_style : undefined,
             response_format: isDalle2 || isDalle3 ? 'b64_json' : undefined,
             moderation: isGptImg ? 'low' : undefined,
+            reverse_proxy: oai_settings.reverse_proxy || undefined,
         }),
     });
 

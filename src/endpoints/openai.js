@@ -637,13 +637,22 @@ router.post('/generate-image', async (request, response) => {
 
         console.debug('OpenAI request', request.body);
 
-        const result = await fetch('https://api.openai.com/v1/images/generations', {
+        const baseUrl = request.body.reverse_proxy
+            ? trimV1(request.body.reverse_proxy)
+            : 'https://api.openai.com/v1';
+        const url = `${baseUrl}/images/generations`;
+
+        // Remove reverse_proxy from the body before forwarding to the API
+        const forwardBody = { ...request.body };
+        delete forwardBody.reverse_proxy;
+
+        const result = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${key}`,
             },
-            body: JSON.stringify(request.body),
+            body: JSON.stringify(forwardBody),
         });
 
         if (!result.ok) {
