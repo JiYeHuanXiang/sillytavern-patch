@@ -59,6 +59,14 @@ export function registerChatMacros() {
         handler: () => String(getLastSwipeId() ?? ''),
     });
 
+    MacroRegistry.registerMacro('currentMessageId', {
+        category: MacroCategory.CHAT,
+        description: 'Index of the message currently being generated or edited.',
+        returns: 'Index of the current message, or empty string if none.',
+        returnType: MacroValueType.INTEGER,
+        handler: () => String(getCurrentMessageId() ?? ''),
+    });
+
     MacroRegistry.registerMacro('currentSwipeId', {
         category: MacroCategory.CHAT,
         description: '1-based index of the current swipe.',
@@ -145,4 +153,8 @@ function getCurrentSwipeId() {
     }
     const swipeId = chat[mid]?.swipe_id;
     return typeof swipeId === 'number' ? swipeId + 1 : null;
+}
+
+function getCurrentMessageId() {
+    return getLastMessageId();
 }
