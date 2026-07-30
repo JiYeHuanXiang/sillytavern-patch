@@ -420,7 +420,7 @@ function RA_autoconnect(PrevApi) {
         if (!connection_made) {
             retry_delay = Math.min(retry_delay * 2, 30000); // double retry delay up to to 30 secs
             // console.log('connection attempts: ' + RA_AC_retries + ' delay: ' + (retry_delay / 1000) + 's');
-            // setTimeout(RA_autoconnect, retry_delay);
+            setTimeout(() => RA_autoconnect(PrevApi), retry_delay);
         }
     }
 }
