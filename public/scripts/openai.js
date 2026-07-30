@@ -3108,6 +3108,22 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
             throw new Error(message);
         }
 
+        // Some providers return HTTP 200 with an empty/invalid choices array.
+        // Detect this early to avoid propagating a confusing "Error: OK" downstream.
+        const hasValidMessage = Array.isArray(data.choices)
+            && data.choices.length > 0
+            && (typeof data.choices[0].message?.content === 'string'
+                || typeof data.choices[0].text === 'string'
+                || typeof data.choices[0].delta?.content === 'string'
+                || typeof data.content === 'string'
+                || typeof data.text === 'string');
+        if (!hasValidMessage && type !== 'quiet') {
+            const message = data.error?.message || data.message || response.statusText || t`API returned an empty response`;
+            toastr.error(message, t`API returned an empty response`);
+            console.warn('Chat completion response had no valid message content', data);
+            throw new Error(message);
+        }
+
         if (type !== 'quiet') {
             const logprobs = parseChatCompletionLogprobs(data);
             // Delay is required to allow the active message to be updated to
