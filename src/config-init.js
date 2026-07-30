@@ -167,7 +167,11 @@ export function addMissingConfigValues(configPath) {
 
         if (!fs.existsSync(configPath)) {
             console.warn(color.yellow(`Warning: config.yaml not found at ${configPath}. Creating a new one with default values.`));
-            fs.writeFileSync(configPath, yaml.stringify(defaultConfig));
+            try {
+                fs.writeFileSync(configPath, yaml.stringify(defaultConfig));
+            } catch (error) {
+                console.warn(color.yellow(`Warning: Could not create config.yaml at ${configPath}.`), error.message);
+            }
             return;
         }
 
@@ -236,7 +240,11 @@ export function addMissingConfigValues(configPath) {
             console.log('Migrating config values in config.yaml:', migratedKeys);
         }
 
-        fs.writeFileSync(configPath, yaml.stringify(config));
+        try {
+            fs.writeFileSync(configPath, yaml.stringify(config));
+        } catch (error) {
+            console.warn(color.yellow(`Warning: Could not update config.yaml at ${configPath}.`), error.message);
+        }
     } catch (error) {
         console.warn(color.yellow('Could not add missing config values to config.yaml'), error);
     }
