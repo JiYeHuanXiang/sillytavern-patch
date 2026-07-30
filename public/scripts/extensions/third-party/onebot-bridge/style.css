@@ -1,0 +1,57 @@
+.onebot_bridge_settings .onebot_bridge_status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85em;
+}
+
+.onebot_bridge_dot {
+    font-size: 1em;
+    line-height: 1;
+}
+
+.onebot_bridge_dot.online {
+    color: #4caf50;
+}
+
+.onebot_bridge_dot.offline {
+    color: #888;
+}
+
+.onebot_bridge_settings .onebot_help {
+    font-size: 0.8em;
+    color: var(--SmartThemeQuoteColor);
+    margin: 6px 0;
+    line-height: 1.5;
+}
+
+.onebot_bridge_settings .onebot_help code {
+    background: var(--black30a);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.9em;
+    color: var(--SmartThemeBodyColor);
+    word-break: break-all;
+}
+
+.onebot_bridge_settings hr {
+    margin: 10px 0;
+    border: 0;
+    border-top: 1px solid var(--SmartThemeBlurTintColor);
+}
+
+.onebot_bridge_settings .text_pole {
+    width: 100%;
+    margin-bottom: 6px;
+}
+
+.onebot_bridge_settings select.text_pole {
+    margin-bottom: 8px;
+}
+
+.onebot_bridge_settings .title {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+}

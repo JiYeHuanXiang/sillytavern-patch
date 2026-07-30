@@ -1,0 +1,14 @@
+{
+    "display_name": "OneBot 群聊桥接",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "ST-Custom",
+    "version": "1.0.0",
+    "home_page": "",
+    "hooks": {
+        "activate": "init"
+    }
+}
