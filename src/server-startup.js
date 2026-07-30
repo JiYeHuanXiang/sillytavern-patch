@@ -45,6 +45,8 @@ import { router as textCompletionsRouter } from './endpoints/backends/text-compl
 import { router as dataMaidRouter } from './endpoints/data-maid.js';
 import { router as backupsRouter } from './endpoints/backups.js';
 import { router as imageMetadataRouter } from './endpoints/image-metadata.js';
+import { router as lanChatRouter } from './endpoints/lan-chat.js';
+import { router as lanDiscoveryRouter } from './endpoints/lan-discovery-api.js';
 
 /**
  * @typedef {object} ServerStartupResult
@@ -54,6 +56,8 @@ import { router as imageMetadataRouter } from './endpoints/image-metadata.js';
  * @property {unknown} [v4Error] The IPv4 server startup error
  * @property {boolean} useIPv6 If use IPv6
  * @property {boolean} useIPv4 If use IPv4
+ * @property {import('http').Server | import('https').Server | null} v4Server The IPv4 HTTP/HTTPS server instance, or null if not started
+ * @property {import('http').Server | import('https').Server | null} v6Server The IPv6 HTTP/HTTPS server instance, or null if not started
  */
 
 /**
@@ -173,6 +177,8 @@ export function setupPrivateEndpoints(app) {
     app.use('/api/data-maid', dataMaidRouter);
     app.use('/api/backups', backupsRouter);
     app.use('/api/image-metadata', imageMetadataRouter);
+    app.use('/api/lan-chat', lanChatRouter);
+    app.use('/api/lan-discovery', lanDiscoveryRouter);
 }
 
 /**
@@ -270,7 +276,7 @@ export class ServerStartup {
             };
             const server = https.createServer(sslOptions, this.app);
             server.on('error', reject);
-            server.on('listening', resolve);
+            server.on('listening', () => resolve(server));
 
             let host = url.hostname;
             if (ipVersion === 6) host = urlHostnameToIPv6(url.hostname);
@@ -287,13 +293,13 @@ export class ServerStartup {
      * Creates an HTTP server.
      * @param {URL} url The URL to listen on
      * @param {number} ipVersion the ip version to use
-     * @returns {Promise<void>} A promise that resolves when the server is listening
+     * @returns {Promise<import('http').Server>} A promise that resolves with the server when it's listening
      */
     #createHttpServer(url, ipVersion) {
         return new Promise((resolve, reject) => {
             const server = http.createServer(this.app);
             server.on('error', reject);
-            server.on('listening', resolve);
+            server.on('listening', () => resolve(server));
 
             let host = url.hostname;
             if (ipVersion === 6) host = urlHostnameToIPv6(url.hostname);
@@ -310,19 +316,22 @@ export class ServerStartup {
      * Starts the server using http or https depending on config
      * @param {boolean} useIPv6 If use IPv6
      * @param {boolean} useIPv4 If use IPv4
-     * @returns {Promise<[boolean, boolean, unknown, unknown]>} A promise that resolves with an array of booleans indicating if the server failed to start on IPv6 and IPv4, respectively, and the corresponding errors
+     * @returns {Promise<[boolean, boolean, unknown, unknown, import('http').Server | import('https').Server | null, import('http').Server | import('https').Server | null]>}
+     * A promise that resolves with: v6Failed, v4Failed, v6Error, v4Error, v6Server, v4Server
      */
     async #startHTTPorHTTPS(useIPv6, useIPv4) {
         let v6Failed = false;
         let v4Failed = false;
         let v6Error;
         let v4Error;
+        let v6Server = null;
+        let v4Server = null;
 
         const createFunc = this.cliArgs.ssl ? this.#createHttpsServer.bind(this) : this.#createHttpServer.bind(this);
 
         if (useIPv6) {
             try {
-                await createFunc(this.cliArgs.getIPv6ListenUrl(), 6);
+                v6Server = await createFunc(this.cliArgs.getIPv6ListenUrl(), 6);
             } catch (error) {
                 console.error('Warning: failed to start server on IPv6');
                 if (this.#isAddressInUseError(error)) {
@@ -338,7 +347,7 @@ export class ServerStartup {
 
         if (useIPv4) {
             try {
-                await createFunc(this.cliArgs.getIPv4ListenUrl(), 4);
+                v4Server = await createFunc(this.cliArgs.getIPv4ListenUrl(), 4);
             } catch (error) {
                 console.error('Warning: failed to start server on IPv4');
                 if (this.#isAddressInUseError(error)) {
@@ -352,7 +361,7 @@ export class ServerStartup {
             }
         }
 
-        return [v6Failed, v4Failed, v6Error, v4Error];
+        return [v6Failed, v4Failed, v6Error, v4Error, v6Server, v4Server];
     }
 
     /**
@@ -432,8 +441,8 @@ export class ServerStartup {
             process.exit(1);
         }
 
-        const [v6Failed, v4Failed, v6Error, v4Error] = await this.#startHTTPorHTTPS(useIPv6, useIPv4);
-        const result = { v6Failed, v4Failed, v6Error, v4Error, useIPv6, useIPv4 };
+        const [v6Failed, v4Failed, v6Error, v4Error, v6Server, v4Server] = await this.#startHTTPorHTTPS(useIPv6, useIPv4);
+        const result = { v6Failed, v4Failed, v6Error, v4Error, useIPv6, useIPv4, v6Server, v4Server };
         this.#handleServerListenFail(result);
         return result;
     }

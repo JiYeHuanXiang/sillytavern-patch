@@ -789,7 +789,7 @@ function addExtensionStyle(name, manifest) {
                 resolve();
             };
             link.onerror = function (e) {
-                reject(e);
+                reject(new Error(`Failed to load CSS: ${url} (${e && e.type || 'unknown'})`));
             };
             document.head.appendChild(link);
         }
@@ -819,7 +819,8 @@ function addExtensionScript(name, manifest) {
             script.src = url;
             script.async = true;
             script.onerror = function (err) {
-                reject(err);
+                const msg = (err && err.message) ? err.message : `Failed to load script: ${url}`;
+                reject(new Error(msg));
             };
             script.onload = function () {
                 if (!ready) {

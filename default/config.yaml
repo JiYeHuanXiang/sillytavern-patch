@@ -392,3 +392,11 @@ gemini:
 enableServerPlugins: false
 # Attempt to automatically update server plugins on startup
 enableServerPluginsAutoUpdate: true
+# LAN chat discovery settings.
+# Set enabled to false to completely disable LAN discovery and chat
+# (useful for solo players who don't want to be disturbed).
+lanDiscovery:
+  enabled: true
+  serviceName: SillyTavern
+  # If true, chat history is persisted to data/<user>/lan-chats/*.jsonl
+  persistHistory: false

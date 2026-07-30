@@ -44,6 +44,7 @@
     <link rel="stylesheet" type="text/css" href="css/mobile-styles.css">
     <link rel="stylesheet" type="text/css" href="css/macros.css">
     <link rel="stylesheet" type="text/css" href="css/user.css">
+    <link rel="stylesheet" type="text/css" href="css/lan-chat.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <!-- Scripts are loaded at the end of the body to improve page load speed -->
 </head>
@@ -5638,6 +5639,35 @@
                                     </label>
                                 </div>
                             </div>
+
+                            <!-- LAN Chat Settings -->
+                            <div class="inline-drawer wide100p flexFlowColumn">
+                                <div class="inline-drawer-toggle inline-drawer-header">
+                                    <b>局域网聊天</b>
+                                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                                </div>
+                                <div class="inline-drawer-content" style="padding: 0 16px;">
+                                    <label class="checkbox_label" for="lan_chat_set_visible" title="在侧边显示/隐藏局域网聊天入口按钮">
+                                        <input id="lan_chat_set_visible" type="checkbox" checked />
+                                        <small>显示聊天面板按钮</small>
+                                    </label>
+                                    <label class="checkbox_label" for="lan_chat_set_join_notify" title="有人加入或离开房间时显示系统消息">
+                                        <input id="lan_chat_set_join_notify" type="checkbox" checked />
+                                        <small>加入/离开提示</small>
+                                    </label>
+                                    <label class="checkbox_label" for="lan_chat_set_persist" title="配合 config.yaml 的 lanDiscovery.persistHistory 使用">
+                                        <input id="lan_chat_set_persist" type="checkbox" />
+                                        <small>保存聊天记录</small>
+                                    </label>
+                                    <div class="flex-container flexGap5 marginTop5 marginBottom10">
+                                        <label class="checkbox_label" for="lan_chat_set_nickname" style="flex:1;">
+                                            <small>主人昵称</small>
+                                        </label>
+                                        <input id="lan_chat_set_nickname" type="text" class="text_pole text_width_auto" placeholder="输入昵称" maxlength="50" style="flex:3;">
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -8199,6 +8229,87 @@
     <!-- Area for hidden data lists for secrets autosuggests -->
     <div id="secrets_datalists" class="displayNone"></div>
 
+    <!-- LAN Chat Panel -->
+    <div id="lan_chat_panel">
+        <div class="lan-chat-header">
+            <span class="lan-chat-title">局域网聊天</span>
+            <span id="lan_chat_conn_status" style="font-size:12px; color:#f44336;">● 未连接</span>
+            <button class="lan-chat-close-btn" id="lan_chat_close_btn" title="关闭">✕</button>
+        </div>
+
+        <!-- Connection View -->
+        <div id="lan_chat_connection_view" class="lan-chat-connection-view">
+            <!-- Create Room Tab Section -->
+            <div class="lan-chat-section-label">你的昵称</div>
+            <input type="text" id="lan_chat_my_name" class="lan-chat-input" placeholder="输入昵称" maxlength="50">
+
+            <div class="lan-chat-tabs" style="margin-top:16px;">
+                <div class="lan-chat-tab active" id="lan_chat_tab_create" data-tab="create">创建房间</div>
+                <div class="lan-chat-tab" id="lan_chat_tab_join" data-tab="join">加入房间</div>
+                <div class="lan-chat-tab" id="lan_chat_tab_discover" data-tab="discover">发现实例</div>
+            </div>
+
+            <!-- Create Tab -->
+            <div class="lan-chat-tab-content active" id="lan_chat_tab_content_create" style="padding-top:16px;">
+                <div class="lan-chat-input-group">
+                    <input type="text" id="lan_chat_create_name" class="lan-chat-input" placeholder="房间名称" maxlength="100">
+                    <button class="lan-chat-btn lan-chat-btn-primary" id="lan_chat_create_btn">创建房间</button>
+                </div>
+            </div>
+
+            <!-- Join Tab -->
+            <div class="lan-chat-tab-content" id="lan_chat_tab_content_join" style="padding-top:16px; flex-direction:column;">
+                <div class="lan-chat-input-group">
+                    <input type="text" id="lan_chat_join_room_id" class="lan-chat-input" placeholder="房间 ID" maxlength="50">
+                    <input type="text" id="lan_chat_join_token" class="lan-chat-input" placeholder="房间令牌" maxlength="64">
+                    <button class="lan-chat-btn lan-chat-btn-primary" id="lan_chat_join_btn">加入房间</button>
+                </div>
+            </div>
+
+            <!-- Discover Tab -->
+            <div class="lan-chat-tab-content" id="lan_chat_tab_content_discover" style="padding-top:16px; flex-direction:column;">
+                <div class="lan-chat-section-label">局域网实例
+                    <button id="lan_chat_refresh_instances" style="float:right; background:none; border:none; cursor:pointer; color:var(--SmartThemeBodyColor,#ccc); font-size:13px;">🔄 刷新</button>
+                </div>
+                <div id="lan_chat_instance_list" class="lan-chat-instance-list">
+                    <div class="lan-chat-empty">正在扫描...</div>
+                </div>
+
+                <div class="lan-chat-section-label">手动添加（FRP/远程）</div>
+                <div class="lan-chat-input-group">
+                    <input type="text" id="lan_chat_manual_name" class="lan-chat-input" placeholder="实例名称（可选）" maxlength="100">
+                    <input type="text" id="lan_chat_manual_host" class="lan-chat-input" placeholder="主机 IP 或域名">
+                    <input type="number" id="lan_chat_manual_port" class="lan-chat-input" placeholder="端口" min="1" max="65535">
+                    <button class="lan-chat-btn" id="lan_chat_manual_add_btn">添加</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Room View -->
+        <div id="lan_chat_room_view" class="lan-chat-room-view" style="display:none;">
+            <div class="lan-chat-room-header">
+                <span class="lan-chat-room-name" id="lan_chat_room_name">房间</span>
+                <div class="lan-chat-room-actions">
+                    <button class="lan-chat-btn" id="lan_chat_leave_btn" style="font-size:12px; padding:4px 12px;">离开</button>
+                </div>
+            </div>
+            <div class="lan-chat-online-users" id="lan_chat_online_users"></div>
+            <div class="lan-chat-messages" id="lan_chat_messages"></div>
+            <div class="lan-chat-ai-trigger" id="lan_chat_ai_trigger_area">
+                <label>
+                    AI 角色: <input type="text" id="lan_chat_ai_name" class="lan-chat-ai-name-input" placeholder="角色名" value="AI">
+                    <button class="lan-chat-btn" id="lan_chat_ai_trigger_btn" style="font-size:11px; padding:2px 8px; margin-left:4px;">触发 AI</button>
+                </label>
+            </div>
+            <div class="lan-chat-input-area">
+                <textarea id="lan_chat_text_input" class="lan-chat-text-input" placeholder="输入消息..." rows="1"></textarea>
+                <button class="lan-chat-send-btn" id="lan_chat_send_btn" title="发送">➤</button>
+            </div>
+        </div>
+    </div>
+    <div id="lan_chat_toggle" title="局域网聊天">💬</div>
+
     <!-- Script includes -->
     <script src="lib/polyfill.js"></script>
     <script src="lib/jquery-3.5.1.min.js"></script>
@@ -8219,6 +8330,7 @@
     <script type="module" src="lib/eventemitter.js"></script>
     <script type="module" src="scripts/i18n.js"></script>
     <script type="module" src="script.js"></script>
+    <script type="module" src="scripts/lan-chat.js"></script>
     <script>
         window.addEventListener('load', (event) => {
             const documentHeight = () => {

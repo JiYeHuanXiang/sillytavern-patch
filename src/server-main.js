@@ -74,6 +74,8 @@ import { redirectDeprecatedEndpoints, ServerStartup, setupPrivateEndpoints } fro
 import { diskCache } from './endpoints/characters.js';
 import { migrateFlatSecrets } from './endpoints/secrets.js';
 import { migrateGroupChatsMetadataFormat } from './endpoints/groups.js';
+import { initLanChatWebSocket, getRoom, broadcastAiMessage } from './endpoints/lan-chat.js';
+import { startDiscovery } from './lan-discovery.js';
 
 // Work around a node v20.0.0, v20.1.0, and v20.2.0 bug. The issue was fixed in v20.3.0.
 // https://github.com/nodejs/node/issues/47822#issuecomment-1564708870
@@ -359,6 +361,27 @@ async function preSetupTasks() {
  * @returns {Promise<void>}
  */
 async function postSetupTasks(result) {
+    // Initialize LAN chat WebSocket server on the first available HTTP server instance
+    const lanEnabled = getConfigValue('lanDiscovery.enabled', true, 'boolean');
+    const httpServer = result.v4Server || result.v6Server;
+    if (httpServer && lanEnabled) {
+        try {
+            initLanChatWebSocket(httpServer);
+            console.log('LAN chat WebSocket server initialized');
+        } catch (err) {
+            console.warn('Failed to initialize LAN chat WebSocket:', err.message);
+        }
+
+        // Start mDNS discovery on the configured port
+        try {
+            startDiscovery(Number(cliArgs.port) || 8000);
+        } catch (err) {
+            console.warn('Failed to start LAN discovery:', err.message);
+        }
+    } else if (!lanEnabled) {
+        console.log('LAN discovery is disabled in config. Set lanDiscovery.enabled to true to enable.');
+    }
+
     const browserLaunchHostname = await cliArgs.getBrowserLaunchHostname(result);
     const browserLaunchUrl = cliArgs.getBrowserLaunchUrl(browserLaunchHostname);
     const browserLaunchApp = String(getConfigValue('browserLaunch.browser', 'default') ?? '');

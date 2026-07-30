@@ -16,6 +16,7 @@ public/TextGen Settings/
 public/instruct/
 public/context/
 public/scripts/extensions/third-party/
+!public/scripts/extensions/third-party/onebot-bridge/
 public/stats.json
 /uploads/
 *.jsonl
@@ -49,9 +50,11 @@ access.log
 public/css/user.css
 public/error/
 /plugins/
+!/plugins/onebot-bridge/
 /data
 /default/scaffold
 public/scripts/extensions/third-party
+!public/scripts/extensions/third-party/onebot-bridge
 /certs
 .aider*
 .env
