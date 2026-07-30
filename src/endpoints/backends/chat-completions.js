@@ -2310,6 +2310,17 @@ router.post('/generate', async function (request, response) {
                     if (cachingAtDepth !== -1) {
                         cachingAtDepthForOpenRouterClaude(request.body.messages, cachingAtDepth, cacheTTL);
                     }
+
+                    // Also provide Anthropic's native web_search tool for models that support it.
+                    if (request.body.enable_web_search && Array.isArray(request.body.tools)) {
+                        const hasWebSearch = request.body.tools.some(t => t.name === 'web_search' || t.type === 'web_search_20250305');
+                        if (!hasWebSearch) {
+                            request.body.tools.unshift({
+                                type: 'web_search_20250305',
+                                name: 'web_search',
+                            });
+                        }
+                    }
                 }
 
                 if (isCacheableGemini && enableGeminiSystemPromptCache) {
