@@ -28,19 +28,21 @@ export default function initRequestProxy({ enabled, url, bypass, enableKeepAlive
             console.warn(color.yellow(LOG_HEADER), 'To ensure all requests are properly filtered, disable the request proxy.');
         }
 
-        if (!url) {
+        const cleanUrl = typeof url === 'string' ? url.trim() : url;
+
+        if (!cleanUrl) {
             console.error(color.red(LOG_HEADER), 'No proxy URL provided');
             return;
         }
 
-        if (!isValidUrl(url)) {
+        if (!isValidUrl(cleanUrl)) {
             console.error(color.red(LOG_HEADER), 'Invalid proxy URL provided');
             return;
         }
 
         // ProxyAgent uses proxy-from-env under the hood
         // Reference: https://github.com/Rob--W/proxy-from-env
-        process.env.all_proxy = url;
+        process.env.all_proxy = cleanUrl;
 
         if (Array.isArray(bypass) && bypass.length > 0) {
             process.env.no_proxy = bypass.join(',');
