@@ -1,19 +1,19 @@
 import { getRequestHeaders } from '../script.js';
+import { groups, selected_group } from './group-chats.js';
 
 // === State ===
 let ws = null;
-let currentRoom = null;       // { roomId, token, name, hostUserId, isHost }
+let currentRoom = null;       // { roomId, token, hostUserId, isHost }
 let myName = 'Anonymous';
-let lastSeq = 0;
-let typingTimeout = null;
-let isTypingSent = false;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let onlineUsers = [];
+let lastBroadcastSendDate = null;   // Host: last message send_date already relayed
+let relayInterval = null;           // Host: polling interval
+let sendInterceptorBound = false;   // Client: capture-phase interceptor installed
 
 // === DOM helper ===
 function $(sel) { return document.querySelector(sel); }
-function $$(sel) { return document.querySelectorAll(sel); }
 
 // === WebSocket URL ===
 function getWsUrl() {
@@ -21,7 +21,7 @@ function getWsUrl() {
     return `${proto}//${location.host}/api/lan-chat/ws`;
 }
 
-// === API calls ===
+// === API ===
 async function apiCall(url, method, body) {
     const res = await fetch(url, {
         method,
@@ -42,52 +42,45 @@ function connectWebSocket(roomId, token, name) {
 
     ws.onopen = () => {
         reconnectAttempts = 0;
-        updateConnectionStatus('connected');
+        updateStatus('connected');
     };
 
     ws.onmessage = (event) => {
         let msg;
-        try {
-            msg = JSON.parse(event.data);
-        } catch {
-            return;
-        }
+        try { msg = JSON.parse(event.data); } catch { return; }
         handleMessage(msg);
     };
 
     ws.onclose = (event) => {
-        updateConnectionStatus('disconnected');
-        if (currentRoom && event.code !== 4000 && event.code !== 4003 && event.code !== 4004) {
+        updateStatus('disconnected');
+        if (event.code === 4000) {
+            toastr.info('房间已被关闭');
+            disconnect();
+        } else if (event.code === 4003) {
+            toastr.error('令牌无效，连接被拒绝');
+            disconnect();
+        } else if (event.code === 4004) {
+            toastr.error('房间不存在');
+            disconnect();
+        } else if (currentRoom) {
             scheduleReconnect();
-        } else if (event.code === 4000) {
-            showSystemMessage('房间已被关闭');
-            leaveRoom(false);
         }
     };
 
-    ws.onerror = () => {
-        // Error handled by onclose
-    };
+    ws.onerror = () => { /* handled by onclose */ };
 }
 
 function scheduleReconnect() {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectAttempts++;
     if (reconnectAttempts > 10) {
-        showSystemMessage('重连失败次数过多，请手动重连');
+        toastr.error('重连失败次数过多，请手动重连');
         return;
     }
     const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 15000);
-    showSystemMessage(`断线重连中... (${reconnectAttempts})`);
     reconnectTimer = setTimeout(() => {
         if (currentRoom) {
             connectWebSocket(currentRoom.roomId, currentRoom.token, myName);
-            // After reconnect, request sync from last known seq
-            setTimeout(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'room-sync-request', sinceSeq: lastSeq }));
-                }
-            }, 500);
         }
     }, delay);
 }
@@ -95,41 +88,52 @@ function scheduleReconnect() {
 // === Message handling ===
 function handleMessage(msg) {
     switch (msg.type) {
+        case 'room-info':
+            currentRoom = {
+                roomId: msg.roomId,
+                token: currentRoom?.token || '',
+                hostUserId: msg.hostUserId,
+                isHost: msg.isHost,
+            };
+            updateRoomUI();
+            break;
+
         case 'room-sync':
             handleRoomSync(msg);
             break;
+
         case 'chat-message':
-            appendMessage(msg);
-            if (msg.seq > lastSeq) lastSeq = msg.seq;
+            appendRemoteMessage(msg.message);
             break;
+
         case 'ai-message':
-            appendMessage(msg);
-            if (msg.seq > lastSeq) lastSeq = msg.seq;
+            appendRemoteMessage(msg.message);
             break;
         case 'user-join':
-            onlineUsers = msg.onlineUsers || onlineUsers;
+            if (!onlineUsers.find(u => u.userId === msg.userId)) {
+                onlineUsers.push({
+                    userId: msg.userId,
+                    name: msg.name,
+                    isHost: currentRoom && msg.userId === currentRoom.hostUserId,
+                });
+            }
             updateOnlineUsers();
-            if (lanSettings.joinNotify) showSystemMessage(`${msg.name} 加入了房间`);
             break;
+
         case 'user-leave':
-            // Refresh online users — we don't have the full list in user-leave,
-            // so we remove the user locally
             onlineUsers = onlineUsers.filter(u => u.userId !== msg.userId);
             updateOnlineUsers();
-            if (lanSettings.joinNotify) showSystemMessage(`${msg.name} 离开了房间`);
             break;
+
         case 'typing':
-            showTypingIndicator(msg.name, msg.isTyping);
+            // Could show typing indicator in chat
             break;
+
         case 'room-closed':
-            showSystemMessage(msg.message || '房间已关闭');
-            leaveRoom(false);
+            toastr.info(msg.message || '房间已关闭');
+            disconnect();
             break;
-        case 'ping':
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'pong' }));
-            }
-            break;
+
         case 'error':
             console.warn('LAN chat error:', msg);
             break;
@@ -137,547 +141,315 @@ function handleMessage(msg) {
 }
 
 function handleRoomSync(msg) {
-    if (msg.roomName && currentRoom) {
-        currentRoom.name = msg.roomName;
-        $('#lan_chat_room_name').textContent = msg.roomName;
-    }
     onlineUsers = msg.onlineUsers || [];
     updateOnlineUsers();
 
-    // Clear and re-render messages
-    const container = $('#lan_chat_messages');
-    container.innerHTML = '';
+    // The host already has the messages in its chat array.
+    // Clients need to merge remote messages into their local chat.
+    if (currentRoom && !currentRoom.isHost && msg.messages) {
+        mergeRemoteMessages(msg.messages);
+    }
+}
 
-    if (msg.messages && msg.messages.length > 0) {
-        msg.messages.forEach(m => {
-            appendMessage(m);
-            if (m.seq > lastSeq) lastSeq = m.seq;
-        });
+/**
+ * Merges remote messages into the local chat array.
+ * Works for both host and clients.
+ * Uses send_date as a rough dedup key.
+ * @param {object[]} messages
+ */
+function mergeRemoteMessages(messages) {
+    // Lazy import to avoid circular dependency
+    import('../script.js').then(script => {
+        const existingDates = new Set(script.chat.map(m => m.send_date));
+        let added = false;
+
+        for (const m of messages) {
+            if (m && m.mes !== undefined && !existingDates.has(m.send_date)) {
+                script.chat.push(m);
+                script.addOneMessage(m, { type: 'append' });
+                existingDates.add(m.send_date);
+                added = true;
+            }
+        }
+
+        if (added) {
+            // Scroll to bottom
+            const chatEl = $('#chat');
+            if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+        }
+    }).catch(err => console.warn('mergeRemoteMessages failed:', err));
+}
+
+/**
+ * Appends a single remote message to the chat.
+ * Host: merges into local chat array (message already persisted by backend).
+ * Client: merges into local chat array for display.
+ * @param {object} message
+ */
+function appendRemoteMessage(message) {
+    if (!message || message.mes === undefined) return;
+
+    // Host: remember this send_date so the relay loop doesn't echo it back
+    if (currentRoom?.isHost && message.send_date) {
+        lastBroadcastSendDate = message.send_date;
+    }
+
+    import('../script.js').then(script => {
+        // Dedup by send_date
+        if (script.chat.some(m => m.send_date === message.send_date)) return;
+        script.chat.push(message);
+        script.addOneMessage(message, { type: 'append' });
+        const chatEl = $('#chat');
+        if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+    }).catch(err => console.warn('appendRemoteMessage failed:', err));
+}
+
+// === UI ===
+function updateStatus(status) {
+    const el = $('#lan_chat_status');
+    if (!el) return;
+    if (status === 'connected') {
+        el.textContent = '● 已连接';
+        el.style.color = '#4caf50';
     } else {
-        showSystemMessage('暂无消息，发送第一条消息开始聊天吧');
-    }
-
-    // Update AI character info
-    if (msg.aiCharacterIds) {
-        // Could be used to show which AI characters are available
-    }
-}
-
-// === UI rendering ===
-function appendMessage(msg) {
-    const container = $('#lan_chat_messages');
-    if (!container) return;
-
-    // Remove typing indicator
-    const typing = container.querySelector('.lan-chat-typing-indicator');
-    if (typing) typing.remove();
-
-    const div = document.createElement('div');
-    div.className = 'lan-chat-message';
-
-    const senderDiv = document.createElement('div');
-    senderDiv.className = 'lan-chat-message-sender';
-    senderDiv.textContent = msg.senderName;
-
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'lan-chat-message-content';
-    contentDiv.textContent = msg.content;
-
-    // Classify message
-    if (msg.senderType === 'ai') {
-        div.classList.add('ai');
-    } else if (msg.senderName === myName) {
-        div.classList.add('own');
-    } else {
-        div.classList.add('other');
-    }
-
-    // Don't show sender name for own messages
-    if (msg.senderName === myName && msg.senderType !== 'ai') {
-        senderDiv.style.display = 'none';
-    }
-
-    div.appendChild(senderDiv);
-    div.appendChild(contentDiv);
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-}
-
-function showSystemMessage(text) {
-    const container = $('#lan_chat_messages');
-    if (!container) return;
-    const div = document.createElement('div');
-    div.className = 'lan-chat-message system';
-    div.textContent = text;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-}
-
-function showTypingIndicator(name, isTyping) {
-    const container = $('#lan_chat_messages');
-    if (!container) return;
-
-    const existing = container.querySelector('.lan-chat-typing-indicator');
-    if (existing) existing.remove();
-
-    if (isTyping && name !== myName) {
-        const div = document.createElement('div');
-        div.className = 'lan-chat-typing-indicator';
-        div.textContent = `${name} 正在输入...`;
-        container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
+        el.textContent = '● 未连接';
+        el.style.color = '#f44336';
     }
 }
 
 function updateOnlineUsers() {
-    const container = $('#lan_chat_online_users');
-    if (!container) return;
-    container.innerHTML = '';
+    const el = $('#lan_chat_online_users');
+    if (!el) return;
+    el.innerHTML = '';
     onlineUsers.forEach(u => {
         const span = document.createElement('span');
-        span.className = 'lan-chat-online-user';
-        span.textContent = u.name;
-        container.appendChild(span);
+        span.className = 'rm_tag';
+        span.style.cssText = 'padding:2px 8px; border-radius:10px; font-size:11px;';
+        if (u.isHost) {
+            span.style.background = 'rgba(106,176,243,0.2)';
+            span.style.color = '#6ab0f3';
+            span.textContent = `👑 ${u.name}`;
+        } else {
+            span.style.background = 'rgba(255,255,255,0.08)';
+            span.textContent = u.name;
+        }
+        el.appendChild(span);
     });
 }
 
-function updateConnectionStatus(status) {
-    const indicator = $('#lan_chat_conn_status');
-    if (!indicator) return;
-    if (status === 'connected') {
-        indicator.textContent = '● 已连接';
-        indicator.style.color = '#4caf50';
-    } else {
-        indicator.textContent = '● 未连接';
-        indicator.style.color = '#f44336';
+function updateRoomUI() {
+    const info = $('#lan_chat_room_info');
+    if (info && currentRoom) {
+        info.style.display = '';
+        const link = $('#lan_chat_share_link');
+        if (link) {
+            const url = `${location.origin}/#room=${currentRoom.roomId}&token=${currentRoom.token}`;
+            link.value = url;
+        }
+        const dcBtn = $('#lan_chat_disconnect');
+        if (dcBtn) dcBtn.style.display = '';
+        const createBtn = $('#lan_chat_create_room');
+        if (createBtn && currentRoom.isHost) createBtn.style.display = 'none';
     }
+}
+
+// === Host relay: broadcast new local messages to clients ===
+function startRelay() {
+    if (relayInterval) clearInterval(relayInterval);
+
+    import('../script.js').then(script => {
+        // Initialize with the last known message so history isn't re-broadcast
+        const last = script.chat[script.chat.length - 1];
+        lastBroadcastSendDate = last?.send_date || null;
+    }).catch(() => { /* ignore */ });
+
+    relayInterval = setInterval(() => {
+        if (!currentRoom?.isHost || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+        import('../script.js').then(script => {
+            const last = script.chat[script.chat.length - 1];
+            if (!last || last.send_date === lastBroadcastSendDate) return;
+
+            lastBroadcastSendDate = last.send_date;
+            ws.send(JSON.stringify({
+                type: last.is_user ? 'chat-message' : 'ai-message',
+                message: last,
+            }));
+        }).catch(() => { /* ignore */ });
+    }, 700);
+}
+
+function stopRelay() {
+    if (relayInterval) {
+        clearInterval(relayInterval);
+        relayInterval = null;
+    }
+    lastBroadcastSendDate = null;
+}
+
+// === Client send: intercept the main input box ===
+function bindSendInterceptor() {
+    if (sendInterceptorBound) return;
+    sendInterceptorBound = true;
+
+    const textarea = document.getElementById('send_textarea');
+    const sendBtn = document.getElementById('send_but');
+
+    // Capture phase: runs before script.js's bubble-phase handlers
+    const interceptSend = (e) => {
+        if (!currentRoom || currentRoom.isHost) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const content = textarea?.value?.trim();
+        if (!content) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        ws.send(JSON.stringify({ type: 'chat-message', content }));
+        if (textarea) textarea.value = '';
+        textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    document.addEventListener('keydown', (e) => {
+        if (e.target !== textarea) return;
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            interceptSend(e);
+        }
+    }, true);
+
+    sendBtn?.addEventListener('click', interceptSend, true);
 }
 
 // === Room management ===
 async function createRoom() {
-    const name = $('#lan_chat_create_name').value.trim() || 'Untitled Room';
-    myName = $('#lan_chat_my_name').value.trim() || 'Anonymous';
+    if (!selected_group) {
+        toastr.warning('请先打开一个群聊');
+        return;
+    }
+
+    myName = $('#lan_chat_nickname').value.trim() || 'Host';
+
+    // Get current chat ID from the group
+    const group = groups.find(g => g.id === selected_group);
+    if (!group) {
+        toastr.error('未找到群组');
+        return;
+    }
+
+    const chatId = group.chat_id;
+    if (!chatId) {
+        toastr.error('未找到群聊会话');
+        return;
+    }
 
     try {
-        const data = await apiCall('/api/lan-chat/create', 'POST', { name });
+        const data = await apiCall('/api/lan-chat/create', 'POST', {
+            groupId: selected_group,
+            chatId,
+        });
+
         if (data.error) {
             toastr.error(data.error);
             return;
         }
+
         currentRoom = {
             roomId: data.roomId,
             token: data.token,
-            name: data.name,
             hostUserId: data.hostUserId,
             isHost: true,
         };
-        showRoomView();
+
         connectWebSocket(data.roomId, data.token, myName);
-        toastr.success('房间已创建');
+        startRelay();
+        updateRoomUI();
+        toastr.success('局域网房间已创建');
     } catch (err) {
         toastr.error('创建房间失败: ' + err.message);
     }
 }
 
-async function joinRoom(host, port, roomId, token) {
-    myName = $('#lan_chat_my_name').value.trim() || 'Anonymous';
+async function joinRoom(roomId, token) {
+    myName = $('#lan_chat_nickname').value.trim() || 'Guest';
 
-    // For local connection, use the same host
-    // For remote (FRP), the frontend would connect to the remote WebSocket
     try {
         const data = await apiCall('/api/lan-chat/join', 'POST', { roomId, token });
         if (data.error) {
             toastr.error(data.error);
             return;
         }
+
         currentRoom = {
-            roomId: data.roomId,
+            roomId,
             token,
-            name: data.name,
             hostUserId: data.hostUserId,
             isHost: false,
         };
-        showRoomView();
-        connectWebSocket(data.roomId, token, myName);
-        toastr.success(`已加入房间: ${data.name}`);
+
+        connectWebSocket(roomId, token, myName);
+        bindSendInterceptor();
+        updateRoomUI();
+        toastr.success('已加入房间，可直接在输入框发送消息');
     } catch (err) {
         toastr.error('加入房间失败: ' + err.message);
     }
 }
 
-function leaveRoom(showConfirm = true) {
-    if (showConfirm && !confirm('确定要离开房间吗？')) return;
-
+function disconnect() {
     if (ws) {
         try { ws.close(1000); } catch { /* ignore */ }
         ws = null;
     }
     currentRoom = null;
-    lastSeq = 0;
+    onlineUsers = [];
     reconnectAttempts = 0;
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
     }
-    showConnectionView();
+    stopRelay();
+    updateStatus('disconnected');
+    updateOnlineUsers();
+    const info = $('#lan_chat_room_info');
+    if (info) info.style.display = 'none';
+    const dcBtn = $('#lan_chat_disconnect');
+    if (dcBtn) dcBtn.style.display = 'none';
+    const createBtn = $('#lan_chat_create_room');
+    if (createBtn) createBtn.style.display = '';
 }
 
-// === Message sending ===
-function sendMessage() {
-    const input = $('#lan_chat_text_input');
-    const content = input.value.trim();
-    if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-    ws.send(JSON.stringify({
-        type: 'chat-message',
-        content,
-    }));
-
-    input.value = '';
-    input.style.height = 'auto';
-
-    // Stop typing indicator
-    if (isTypingSent) {
-        ws.send(JSON.stringify({ type: 'typing', isTyping: false }));
-        isTypingSent = false;
-    }
-}
-
-// === AI trigger (host only) ===
-async function triggerAi() {
-    if (!currentRoom || !currentRoom.isHost) {
-        toastr.warning('只有房主可以触发 AI 回复');
-        return;
-    }
-
-    const aiName = $('#lan_chat_ai_name').value.trim() || 'AI';
-    const input = $('#lan_chat_text_input');
-    const content = input.value.trim();
-
-    if (!content) {
-        toastr.warning('请输入要发送给 AI 的内容');
-        return;
-    }
-
-    // First send as human message
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'chat-message', content }));
-        input.value = '';
-    }
-
-    // Then trigger AI generation via existing Generate pipeline
-    // This is a simplified integration — in production, the host would call
-    // the existing Generate() function with appropriate context
-    toastr.info('AI 正在生成回复...');
-
-    try {
-        // Use the host's existing AI generation setup
-        // The actual generation will be done by the frontend's Generate function
-        // and then submitted via /api/lan-chat/ai-generate
-        const result = await triggerHostAiGeneration(content, aiName);
-        if (result) {
-            await apiCall('/api/lan-chat/ai-generate', 'POST', {
-                roomId: currentRoom.roomId,
-                token: currentRoom.token,
-                senderName: aiName,
-                content: result,
-            });
-        }
-    } catch (err) {
-        toastr.error('AI 生成失败: ' + err.message);
-    }
-}
-
-/**
- * Triggers AI generation on the host using existing SillyTavern infrastructure.
- * This is a placeholder that delegates to the main Generate function.
- * @param {string} userMessage The user's message
- * @param {string} aiName The AI character name
- * @returns {Promise<string|null>}
- */
-async function triggerHostAiGeneration(userMessage, aiName) {
-    // This function integrates with the existing SillyTavern Generate pipeline.
-    // In the full implementation, it would:
-    // 1. Set up context from the LAN chat history
-    // 2. Call Generate() with appropriate parameters
-    // 3. Return the generated text
-    //
-    // For now, we return null to indicate the feature requires
-    // manual integration with the user's configured AI backend.
-    // The host can still use the regular chat interface to generate
-    // and then paste results, or this can be extended later.
-
-    // Check if Generate function is available (loaded from script.js)
-    if (typeof window.Generate === 'function') {
-        try {
-            // Generate with the user message as context
-            const result = await window.Generate('normal', { });
-            return result;
-        } catch {
-            return null;
-        }
-    }
-    return null;
-}
-
-// === Instance discovery ===
-async function refreshInstances() {
-    try {
-        const data = await apiCall('/api/lan-discovery/instances', 'GET');
-        renderInstances(data.instances || []);
-    } catch (err) {
-        console.warn('Failed to refresh instances:', err);
-    }
-}
-
-function renderInstances(instances) {
-    const container = $('#lan_chat_instance_list');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (instances.length === 0) {
-        container.innerHTML = '<div class="lan-chat-empty">未发现局域网实例<br><small>请确认其他实例已启用局域网发现</small></div>';
-        return;
-    }
-
-    instances.forEach(inst => {
-        const div = document.createElement('div');
-        div.className = 'lan-chat-instance-item';
-
-        const info = document.createElement('div');
-        info.className = 'lan-chat-instance-info';
-        const name = document.createElement('div');
-        name.className = 'lan-chat-instance-name';
-        name.textContent = inst.name;
-        const addr = document.createElement('div');
-        addr.className = 'lan-chat-instance-addr';
-        addr.textContent = `${inst.host}:${inst.port}`;
-        info.appendChild(name);
-        info.appendChild(addr);
-
-        const badge = document.createElement('span');
-        badge.className = `lan-chat-instance-badge ${inst.source}`;
-        badge.textContent = inst.source === 'mdns' ? 'LAN' : 'Manual';
-
-        div.appendChild(info);
-        div.appendChild(badge);
-        container.appendChild(div);
-    });
-}
-
-async function addManualInstance() {
-    const name = $('#lan_chat_manual_name').value.trim() || 'Manual';
-    const host = $('#lan_chat_manual_host').value.trim();
-    const port = parseInt($('#lan_chat_manual_port').value);
-
-    if (!host || !port) {
-        toastr.warning('请填写主机和端口');
-        return;
-    }
-
-    try {
-        await apiCall('/api/lan-discovery/instances/add', 'POST', { name, host, port });
-        $('#lan_chat_manual_name').value = '';
-        $('#lan_chat_manual_host').value = '';
-        $('#lan_chat_manual_port').value = '';
-        refreshInstances();
-        toastr.success('已添加');
-    } catch (err) {
-        toastr.error('添加失败: ' + err.message);
-    }
-}
-
-// === View switching ===
-function showRoomView() {
-    $('#lan_chat_connection_view').style.display = 'none';
-    $('#lan_chat_room_view').style.display = 'flex';
-    if (currentRoom) {
-        $('#lan_chat_room_name').textContent = currentRoom.name;
-    }
-    // Focus input
-    setTimeout(() => $('#lan_chat_text_input')?.focus(), 100);
-}
-
-function showConnectionView() {
-    $('#lan_chat_room_view').style.display = 'none';
-    $('#lan_chat_connection_view').style.display = 'block';
-}
-
-function switchTab(tabName) {
-    $$('.lan-chat-tab').forEach(t => t.classList.remove('active'));
-    $$('.lan-chat-tab-content').forEach(c => c.classList.remove('active'));
-    $(`#lan_chat_tab_${tabName}`).classList.add('active');
-    $(`#lan_chat_tab_content_${tabName}`).classList.add('active');
-}
-
-// === Panel toggle ===
-function togglePanel() {
-    const panel = $('#lan_chat_panel');
-    const toggle = $('#lan_chat_toggle');
-    const isOpen = panel.classList.contains('lan-chat-open');
-
-    if (isOpen) {
-        panel.classList.remove('lan-chat-open');
-        toggle.classList.remove('lan-chat-hidden');
-    } else {
-        panel.classList.add('lan-chat-open');
-        // Refresh instances when opening
-        refreshInstances();
-    }
-}
-
-function closePanel() {
-    $('#lan_chat_panel').classList.remove('lan-chat-open');
-}
-
-// === Typing indicator ===
-function handleTyping() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-    if (!isTypingSent) {
-        isTypingSent = true;
-        ws.send(JSON.stringify({ type: 'typing', isTyping: true }));
-    }
-
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => {
-        if (isTypingSent && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'typing', isTyping: false }));
-            isTypingSent = false;
-        }
-    }, 2000);
-}
-
-// === Settings persistence ===
-const SETTINGS_KEY = 'lanChatSettings';
-
-/** @type {{ myName: string, visible: boolean, joinNotify: boolean, persist: boolean }} */
-let lanSettings = {
-    myName: 'Anonymous',
-    visible: true,
-    joinNotify: true,
-    persist: false,
-};
-
-function loadSettings() {
-    const saved = localStorage.getItem(SETTINGS_KEY);
+// === Settings ===
+function loadNickname() {
+    const saved = localStorage.getItem('lanChatNickname');
     if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            lanSettings = { ...lanSettings, ...parsed };
-        } catch { /* ignore */ }
-    }
-    applySettingsToUI();
-}
-
-function saveSettingsToStorage() {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(lanSettings));
-}
-
-function applySettingsToUI() {
-    myName = lanSettings.myName;
-    const nameInput = $('#lan_chat_my_name');
-    if (nameInput && document.activeElement !== nameInput) nameInput.value = myName;
-    const nickInput = $('#lan_chat_set_nickname');
-    if (nickInput && document.activeElement !== nickInput) nickInput.value = myName;
-
-    const visCheck = $('#lan_chat_set_visible');
-    if (visCheck) visCheck.checked = lanSettings.visible;
-    const jnCheck = $('#lan_chat_set_join_notify');
-    if (jnCheck) jnCheck.checked = lanSettings.joinNotify;
-    const pCheck = $('#lan_chat_set_persist');
-    if (pCheck) pCheck.checked = lanSettings.persist;
-
-    applyPanelVisibility();
-}
-
-function applyPanelVisibility() {
-    const toggle = $('#lan_chat_toggle');
-    if (!toggle) return;
-    if (lanSettings.visible) {
-        toggle.style.display = '';
-        toggle.style.opacity = '';
-        toggle.title = '局域网聊天';
-    } else {
-        toggle.style.display = '';
-        toggle.style.opacity = '0.35';
-        toggle.title = '局域网聊天（已隐藏，点击设置中开启）';
+        myName = saved;
+        const input = $('#lan_chat_nickname');
+        if (input) input.value = saved;
     }
 }
 
-function setupSettingsBindings() {
-    // Nickname — sync with panel input
-    const nickInput = $('#lan_chat_set_nickname');
-    if (nickInput) {
-        nickInput.addEventListener('input', () => {
-            const val = nickInput.value.trim() || 'Anonymous';
-            lanSettings.myName = val;
-            myName = val;
-            const panelName = $('#lan_chat_my_name');
-            if (panelName && document.activeElement !== panelName) panelName.value = val;
-            saveSettingsToStorage();
-        });
-    }
-
-    // Bind checkboxes
-    const bindCheckbox = (id, key) => {
-        const el = $(id);
-        if (!el) return;
-        el.addEventListener('change', () => {
-            lanSettings[key] = el.checked;
-            saveSettingsToStorage();
-            if (key === 'visible') applyPanelVisibility();
-        });
-    };
-    bindCheckbox('#lan_chat_set_visible', 'visible');
-    bindCheckbox('#lan_chat_set_join_notify', 'joinNotify');
-    bindCheckbox('#lan_chat_set_persist', 'persist');
+function saveNickname() {
+    localStorage.setItem('lanChatNickname', myName);
 }
 
 // === Init ===
 export function initLanChat() {
-    // Load settings
-    loadSettings();
+    loadNickname();
 
-    // Check if LAN chat is enabled on the server
+    // Check if LAN is enabled
     fetch('/api/lan-discovery/status')
         .then(r => r.json())
         .then(data => {
-            if (!data.enabled) {
-                // LAN chat disabled — hide the toggle button entirely
-                const toggle = $('#lan_chat_toggle');
-                if (toggle) toggle.style.display = 'none';
-                const panel = $('#lan_chat_panel');
-                if (panel) panel.style.display = 'none';
-                return;
-            }
-            // LAN chat enabled — proceed with binding events
+            if (!data.enabled) return;
             bindEvents();
-            refreshInstances();
-            console.log('LAN chat module initialized');
         })
-        .catch(() => {
-            // If status check fails, hide the panel to be safe
-            const toggle = $('#lan_chat_toggle');
-            if (toggle) toggle.style.display = 'none';
-        });
+        .catch(() => { /* LAN disabled */ });
 }
 
 function bindEvents() {
-    $('#lan_chat_toggle')?.addEventListener('click', togglePanel);
-    $('#lan_chat_close_btn')?.addEventListener('click', closePanel);
+    $('#lan_chat_create_room')?.addEventListener('click', createRoom);
 
-    // Tab switching
-    $$('.lan-chat-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            switchTab(tab.dataset.tab);
-        });
-    });
-
-    // Create room
-    $('#lan_chat_create_btn')?.addEventListener('click', createRoom);
-
-    // Join room
     $('#lan_chat_join_btn')?.addEventListener('click', () => {
         const roomId = $('#lan_chat_join_room_id').value.trim();
         const token = $('#lan_chat_join_token').value.trim();
@@ -685,51 +457,39 @@ function bindEvents() {
             toastr.warning('请填写房间 ID 和令牌');
             return;
         }
-        joinRoom(null, null, roomId, token);
+        joinRoom(roomId, token);
     });
 
-    // Leave room
-    $('#lan_chat_leave_btn')?.addEventListener('click', () => leaveRoom(true));
+    $('#lan_chat_disconnect')?.addEventListener('click', disconnect);
 
-    // Send message
-    $('#lan_chat_send_btn')?.addEventListener('click', sendMessage);
-    const textInput = $('#lan_chat_text_input');
-    if (textInput) {
-        textInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-        textInput.addEventListener('input', () => {
-            // Auto-resize
-            textInput.style.height = 'auto';
-            textInput.style.height = Math.min(textInput.scrollHeight, 100) + 'px';
-            handleTyping();
-        });
-    }
-
-    // AI trigger
-    $('#lan_chat_ai_trigger_btn')?.addEventListener('click', triggerAi);
-
-    // Manual instance add
-    $('#lan_chat_manual_add_btn')?.addEventListener('click', addManualInstance);
-
-    // Refresh instances
-    $('#lan_chat_refresh_instances')?.addEventListener('click', refreshInstances);
-
-    // Settings bindings (nicknames + checkboxes)
-    setupSettingsBindings();
-
-    // Auto-refresh instances every 10s when panel is open
-    setInterval(() => {
-        if ($('#lan_chat_panel')?.classList.contains('lan-chat-open')) {
-            refreshInstances();
+    $('#lan_chat_copy_link')?.addEventListener('click', () => {
+        const link = $('#lan_chat_share_link');
+        if (link && link.value) {
+            navigator.clipboard.writeText(link.value).then(() => {
+                toastr.success('链接已复制');
+            });
         }
-    }, 10000);
+    });
+
+    $('#lan_chat_nickname')?.addEventListener('input', () => {
+        myName = $('#lan_chat_nickname').value.trim() || 'Anonymous';
+        saveNickname();
+    });
+
+    // Auto-join from URL hash: #room=xxx&token=yyy
+    const hash = location.hash;
+    if (hash.startsWith('#room=')) {
+        const params = new URLSearchParams(hash.slice(1));
+        const roomId = params.get('room');
+        const token = params.get('token');
+        if (roomId && token) {
+            // Wait a bit for the UI to be ready
+            setTimeout(() => joinRoom(roomId, token), 1000);
+        }
+    }
 }
 
-// Auto-init when DOM is ready
+// Auto-init
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initLanChat);
 } else {
