@@ -2081,7 +2081,13 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
 
         mes = mes.replaceAll('\\begin{align*}', '$$');
         mes = mes.replaceAll('\\end{align*}', '$$');
-        mes = converter.makeHtml(mes);
+
+        // Render complete HTML pages as sandboxed iframe previews if enabled
+        if (power_user.render_html_pages && isFullHtmlPage(mes)) {
+            mes = renderHtmlPreview(mes.trim(), 'Embedded HTML Page');
+        } else {
+            mes = converter.makeHtml(mes);
+        }
 
         mes = mes.replace(/<code(.*)>[\s\S]*?<\/code>/g, function (match) {
             // Firefox creates extra newlines from <br>s in code blocks, so we replace them before converting newlines to <br>s.
@@ -2105,7 +2111,8 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
         RETURN_DOM_FRAGMENT: false,
         RETURN_TRUSTED_TYPE: false,
         MESSAGE_SANITIZE: true,
-        ADD_TAGS: ['custom-style'],
+        ADD_TAGS: ['custom-style', 'iframe'],
+        ADD_ATTR: ['sandbox', 'allow', 'loading', 'data-preview-id', 'data-preview-html', 'data-needs-src'],
         ...sanitizerOverrides,
     };
     mes = encodeStyleTags(mes);
@@ -2621,24 +2628,157 @@ export function appendMediaToMessage(mes, messageElement, scrollBehavior = SCROL
     });
 }
 
+/**
+ * Detects whether a string looks like a complete HTML document.
+ * @param {string} text The text to check
+ * @returns {boolean} True if it appears to be a full HTML page
+ */
+function isFullHtmlPage(text) {
+    if (!text || typeof text !== 'string') {
+        return false;
+    }
+    const trimmed = text.trim().toLowerCase();
+    return trimmed.startsWith('<!doctype html>') || (trimmed.includes('<html') && trimmed.includes('</html>'));
+}
+
+/**
+ * Renders a complete HTML page as a sandboxed iframe preview.
+ * @param {string} html The raw HTML to preview
+ * @param {string} [title] Optional title for the preview container
+ * @returns {string} HTML string containing the preview
+ */
+function renderHtmlPreview(html, title = 'HTML Preview') {
+    try {
+        const uid = `html-preview-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        const escapedTitle = escapeHtml(title);
+        // The raw HTML is base64-encoded and stashed in a data-* attribute. DOMPurify
+        // runs after this string is inserted into message HTML; a blob: src would be
+        // stripped by the default URI allowlist and blob URLs also produce spurious
+        // network errors. Base64 is pure ASCII with no special chars, so it survives
+        // sanitization untouched. activateHtmlPreviews() decodes it and assigns it
+        // to iframe.srcdoc via the DOM API (post-sanitization, no value checks).
+        const encoded = btoa(unescape(encodeURIComponent(html)));
+        return `<div class="html-preview-container" data-preview-id="${uid}">
+            <div class="html-preview-header">
+                <span class="html-preview-title">${escapedTitle}</span>
+                <i class="fa-solid fa-code html-preview-toggle interactable" title="Toggle source view" role="button" tabindex="0"></i>
+            </div>
+            <iframe class="html-preview-frame" data-preview-html="${encoded}" data-needs-src="1" sandbox="allow-scripts allow-popups allow-forms" loading="lazy" title="${escapedTitle}"></iframe>
+            <pre class="html-preview-source" style="display:none;"><code class="language-html">${escapeHtml(html)}</code></pre>
+        </div>`;
+    } catch (e) {
+        console.error('Failed to render HTML preview:', e);
+        return `<pre><code class="language-html">${escapeHtml(html)}</code></pre>`;
+    }
+}
+
 export function addCopyToCodeBlocks(messageElement) {
     const codeBlocks = $(messageElement).find('pre code');
     for (let i = 0; i < codeBlocks.length; i++) {
-        hljs.highlightElement(codeBlocks.get(i));
+        const codeBlock = codeBlocks.get(i);
+        const originalText = codeBlock.textContent || '';
+        const isHtmlPage = power_user.render_html_pages && isFullHtmlPage(originalText);
+        hljs.highlightElement(codeBlock);
+        const buttonGroup = document.createElement('span');
+        buttonGroup.classList.add('code-block-actions');
+
         const copyButton = document.createElement('i');
         copyButton.classList.add('fa-solid', 'fa-copy', 'code-copy', 'interactable');
         copyButton.title = 'Copy code';
-        codeBlocks.get(i).appendChild(copyButton);
         copyButton.addEventListener('click', function (e) {
             e.stopPropagation();
         });
         copyButton.addEventListener('pointerup', async function () {
-            const text = codeBlocks.get(i).textContent;
+            const text = codeBlock.textContent;
             await copyText(text);
             toastr.info(t`Copied!`, '', { timeOut: 2000 });
         });
+        buttonGroup.appendChild(copyButton);
+
+        if (isHtmlPage) {
+            const previewButton = document.createElement('i');
+            previewButton.classList.add('fa-solid', 'fa-eye', 'code-preview', 'interactable');
+            previewButton.title = 'Preview HTML';
+            previewButton.addEventListener('click', function (e) {
+                e.stopPropagation();
+            });
+            previewButton.addEventListener('pointerup', async function () {
+                const container = document.createElement('div');
+                container.innerHTML = renderHtmlPreview(originalText.trim(), 'Code Block HTML Preview');
+                const popupPromise = callGenericPopup(container, POPUP_TYPE.TEXT, '', { allowVerticalOverflow: true });
+                // Activate on the next frame, after the popup has appended the
+                // container to the (now visible) dialog DOM.
+                activateHtmlPreviews(container);
+                void await popupPromise;
+            });
+            buttonGroup.appendChild(previewButton);
+        }
+
+        codeBlock.appendChild(buttonGroup);
     }
+
+    // Inject blob/object URLs into iframes after DOMPurify has run on the message.
+    activateHtmlPreviews(messageElement);
 }
+
+/**
+ * Decodes base64-encoded HTML from data-preview-html and assigns it to each
+ * preview iframe's srcdoc via the DOM API.
+ *
+ * The HTML is transported as a base64 data-* attribute, which DOMPurify leaves
+ * untouched. Assigning srcdoc here (after sanitization) means the raw HTML is
+ * never re-processed by the sanitizer, and no blob: URL or network request is
+ * involved.
+ *
+ * The injection is deferred to the next animation frame because callers
+ * (e.g. updateMessageElement -> addCopyToCodeBlocks) invoke this while the
+ * message element is still detached; by the next frame it has been appended to
+ * the document, so frame.isConnected is true and srcdoc takes effect.
+ * @param {ParentNode} [scope=document.body] Element to search within
+ */
+export function activateHtmlPreviews(scope = document.body) {
+    requestAnimationFrame(() => {
+        // Accept jQuery objects, HTMLElements, Document, or DocumentFragment.
+        const root = (scope && scope.jquery) ? scope[0] : scope;
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        const frames = root.querySelectorAll('iframe.html-preview-frame[data-needs-src]');
+        for (const frame of frames) {
+            const encoded = frame.getAttribute('data-preview-html');
+            if (encoded && frame.isConnected) {
+                try {
+                    // Assign via DOM API (post-sanitization) so the HTML is not
+                    // re-processed by DOMPurify. srcdoc renders inline, no network/blob.
+                    frame.srcdoc = decodeURIComponent(escape(atob(encoded)));
+                } catch (e) {
+                    console.error('Failed to decode HTML preview:', e);
+                }
+            }
+            if (frame.isConnected) {
+                frame.removeAttribute('data-needs-src');
+            }
+        }
+    });
+}
+
+// Event delegation for HTML preview source toggle
+document.addEventListener('click', function (e) {
+    const toggle = e.target.closest('.html-preview-toggle');
+    if (!toggle) return;
+    const container = toggle.closest('.html-preview-container');
+    if (!container) return;
+    const frame = container.querySelector('.html-preview-frame');
+    const source = container.querySelector('.html-preview-source');
+    if (!frame || !source) return;
+    const showingPreview = frame.style.display !== 'none';
+    frame.style.display = showingPreview ? 'none' : 'block';
+    source.style.display = showingPreview ? 'block' : 'none';
+    toggle.classList.toggle('fa-eye', showingPreview);
+    toggle.classList.toggle('fa-code', !showingPreview);
+    toggle.title = showingPreview ? 'Show preview' : 'Show source';
+    if (showingPreview) {
+        hljs.highlightElement(source.querySelector('code'));
+    }
+});
 
 /**
  * Shows or hides the Prompt display button

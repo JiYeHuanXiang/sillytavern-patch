@@ -300,6 +300,7 @@ export const power_user = {
     fuzzy_search: false,
     encode_tags: false,
     experimental_macro_engine: true,
+    render_html_pages: true,
     servers: [],
     bogus_folders: false,
     zoomed_avatar_magnification: false,
@@ -1780,7 +1781,7 @@ export async function loadPowerUserSettings(settings, data) {
     $('#auto-load-chat-checkbox').prop('checked', power_user.auto_load_chat);
     $('#forbid_external_media').prop('checked', power_user.forbid_external_media);
     $('#pin_styles').prop('checked', power_user.pin_styles);
-    $('#click_to_edit').prop('checked', power_user.click_to_edit);
+    $('#render_html_pages').prop('checked', power_user.render_html_pages);
     $('#media_display').val(power_user.media_display);
     $('#image_overswipe').val(power_user.image_overswipe);
 
@@ -4043,6 +4044,12 @@ jQuery(() => {
         power_user.pin_styles = !!$(this).prop('checked');
         saveSettingsDebounced();
         applyStylePins();
+    });
+
+    $('#render_html_pages').on('input', function () {
+        power_user.render_html_pages = !!$(this).prop('checked');
+        saveSettingsDebounced();
+        reloadCurrentChat();
     });
 
     $('#click_to_edit').on('input', function () {

@@ -192,6 +192,7 @@
         "fuzzy_search": true,
         "encode_tags": false,
         "experimental_macro_engine": true,
+        "render_html_pages": true,
         "enableLabMode": false,
         "enableZenSliders": false,
         "ui_mode": 1,

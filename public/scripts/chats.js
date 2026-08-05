@@ -1927,7 +1927,7 @@ export function addDOMPurifyHooks() {
             case 'class': {
                 if (data.attrValue) {
                     data.attrValue = data.attrValue.split(' ').map((v) => {
-                        if (v.startsWith('fa-') || v.startsWith('note-') || v === 'monospace') {
+                        if (v.startsWith('fa-') || v.startsWith('note-') || v === 'monospace' || v.startsWith('html-preview-') || v === 'code-block-actions' || v === 'code-copy' || v === 'code-preview') {
                             return v;
                         }
 
@@ -1995,7 +1995,7 @@ export function addDOMPurifyHooks() {
             case 'EMBED':
             case 'OBJECT':
             case 'IMG': {
-                const isExternalUrl = (url) => (url.indexOf('://') > 0 || url.indexOf('//') === 0) && !url.startsWith(window.location.origin);
+                const isExternalUrl = (url) => (url.indexOf('://') > 0 || url.indexOf('//') === 0) && !url.startsWith(window.location.origin) && !url.startsWith('blob:');
                 const src = node.getAttribute('src');
                 const data = node.getAttribute('data');
                 const srcset = node.getAttribute('srcset');
