@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.1-brightgreen.svg)](CHANGELOG.md)
 
 基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
 
@@ -27,10 +27,17 @@
 - **并发角色卡扫描**：新增可配置并发数的角色卡列表扫描，角色卡数量巨大时加载显著提速。并发数根据 CPU 核数自动探测（≤4 核 → 8，>4 核 → 32，Android/Termux → 8），也可在 `config.yaml` 中手动指定。
 - **移动端世界书搜索**：角色、人格与聊天内 Lorebook / 世界书选择器在移动端替换为带关键词过滤的搜索界面，原生的全屏 `<select>` 选择器无法搜索，这在移动端极不友好。
 - **MacroBrowser 扩展**：内置 MacroBrowser 扩展及预设配置，便于浏览与插入宏。
+- **群聊定向发送与消息可见性**：群聊中支持定向发送消息（directed send），并可按角色控制消息可见性，提升多人角色扮演的灵活度。
+- **HTML 页面沙箱预览**：当消息（包括角色卡 `first_mes`）或代码块内容为完整 HTML 页面时，可选择将其渲染为 sandboxed iframe 预览，而非仅显示源代码。
+  > 用户设置的消息显示区域新增"将完整 HTML 页面渲染为沙箱预览"开关（默认开启）。角色卡 `first_mes` 中的完整 HTML 页面会直接以 iframe 形式内嵌在聊天中，并支持源码/预览切换；普通消息中的 HTML 代码块会显示"预览 HTML"按钮，点击后在弹窗中查看渲染效果。
+  >
+  > 该功能同时修复了原版遇到完整 HTML 页面时只能直接显示代码块的问题。
+- **LAN 聊天（实验性）**：支持同一本地网络下的多个实例互相通信。
+  > 该功能为半成品，暂无测试环境覆盖，仅供参考。可在 `config.yaml` 的 `lanDiscovery` 中开关并持久化聊天历史；聊天面板已整合进群聊界面。
 
 ### 精简与优化
 
-- 移除未使用的扩展（caption、gallery、stable-diffusion、translate、tts 等）及其对应的后端端点、video generation 代码，减小体积、降低维护面。
+- 移除未使用的扩展（caption、gallery、translate 等）及其对应的后端端点、video generation 代码，减小体积、降低维护面（早期版本移除的 regex、tts、stable-diffusion 扩展后续已恢复）。
 - 优化 PNG 角色卡元数据处理逻辑，修复角色列表空白状态问题。
 - 移除 `getEntitiesList` 的内存缓存以修正过期结果问题。
 
@@ -91,6 +98,7 @@ docker compose up -d
 - `whitelistMode` / `whitelist`：IP 白名单，默认仅允许本机访问
 - `listen`：是否监听所有网卡（默认 `false`，仅本机）
 - `performance.characterListConcurrency`：角色卡扫描并发数
+- `lanDiscovery`：LAN 聊天发现配置（实验性）：`enabled`（默认 `true`）开关本地网络聊天，`persistHistory` 将聊天历史持久化到 `data/<user>/lan-chats/*.jsonl`
 - `securityOverride` / `disableCsrfProtection`：安全相关开关，**请谨慎使用**
 
 > 首次启动会自动在 `data/` 下创建用户数据目录（默认用户 `default-user`），角色卡放在 `data/default-user/characters/`，支持子目录。
@@ -136,7 +144,8 @@ sillytavern-patch/
 ## ⚠️ 已知限制与说明
 
 - **非官方分支**：本仓库不承诺与上游保持同步更新，也不承诺兼容上游的所有扩展与插件。
-- **部分扩展已被移除**：caption、gallery、ranslate等扩展及对应后端端点已删除，依赖这些功能的用户请使用上游版本。
+- **部分扩展已被移除**：caption、gallery、translate 等扩展及对应后端端点已删除，依赖这些功能的用户请使用上游版本。
+- **LAN 聊天为实验性功能**：LAN 聊天为半成品，暂无测试环境覆盖，后续版本可能调整或移除。
 - **模型适配范围有限**：思考模式开关主要针对 DeepSeek 验证，其它国内模型（如 Qwen）为按需适配，未做全面回归测试。
 - **安全性**：默认仅监听本机；如需对外暴露请务必配置 `listen`、白名单、CSRF 及 Basic Auth，并评估风险。
 
