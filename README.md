@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.1-brightgreen.svg)](CHANGELOG.md)
 [![Android Client](https://img.shields.io/badge/Android%20Client-ST--patch--android-3DDC84.svg?logo=android&logoColor=white)](https://github.com/JiYeHuanXiang/ST-patch-android)
 
 A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/SillyTavern) with targeted improvements for **Chinese domestic LLMs** and **large character card collections**.
@@ -27,10 +27,17 @@ A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/Sill
 - **Concurrent Character Card Scanning**: Configurable concurrency for character list scanning, significantly speeding up load times with huge collections. Concurrency is auto-detected based on CPU core count (≤4 cores → 8, >4 cores → 32, Android/Termux → 8) and can be manually set in `config.yaml`.
 - **Mobile-Friendly World Book Search**: The Lorebook / World Book picker for characters, personas, and chats is replaced on mobile with a keyword-filtered search UI — the native full-screen `<select>` dropdown lacks search, making it extremely unfriendly on mobile.
 - **MacroBrowser Extension**: Built-in MacroBrowser extension with preset configurations for browsing and inserting macros.
+- **Directed Send & Per-Character Visibility in Group Chats**: Group chats support directed message sending and per-character message visibility control, adding flexibility for multi-user roleplay.
+- **Sandboxed HTML Page Preview**: When a message (including a character card's `first_mes`) or a code block contains a complete HTML page, you can render it as a sandboxed iframe preview instead of only seeing the raw source.
+  > Adds a "Render complete HTML pages as sandboxed preview" toggle (on by default) in user settings under message display. Full HTML pages in `first_mes` are embedded directly in the chat as iframes with source/preview switching; HTML code blocks in regular messages get a "Preview HTML" button that opens a popup with the rendered result.
+  >
+  > This also fixes the upstream behavior of dumping full HTML pages as plain code blocks.
+- **LAN Chat (Experimental)**: Communicate between multiple SillyTavern instances on the same local network.
+  > This is a work-in-progress feature with no test coverage — evaluate stability before relying on it. Enable it via the `lanDiscovery` setting in `config.yaml`; chat history can be persisted. The panel is integrated into the group chat interface.
 
 ### Trimming & Optimizations
 
-- Removed unused extensions (caption, gallery, stable-diffusion, translate, tts, etc.) along with their backend endpoints and video generation code, reducing footprint and maintenance surface.
+- Removed unused extensions (caption, gallery, translate, etc.) along with their backend endpoints and video generation code, reducing footprint and maintenance surface. (The regex, tts, and stable-diffusion extensions, removed in earlier releases, have since been restored.)
 - Optimized PNG character card metadata handling; fixed blank character list state.
 - Removed in-memory cache on `getEntitiesList` to fix stale result issues.
 
@@ -91,6 +98,7 @@ The main config file is [`config.yaml`](config.yaml). Common options:
 - `whitelistMode` / `whitelist` — IP whitelist; by default only localhost is allowed
 - `listen` — whether to listen on all network interfaces (default `false`, localhost only)
 - `performance.characterListConcurrency` — character card scan concurrency
+- `lanDiscovery` — LAN chat discovery (experimental): `enabled` (default `true`) toggles local network chat; `persistHistory` saves chat history to `data/<user>/lan-chats/*.jsonl`
 - `securityOverride` / `disableCsrfProtection` — security toggles; **use with caution**
 
 > On first launch, a user data directory is automatically created under `data/` (default user `default-user`). Character cards go in `data/default-user/characters/` — subdirectories are supported.
@@ -137,6 +145,7 @@ sillytavern-patch/
 
 - **Not an official fork**: This repo does not guarantee synchronization with upstream nor compatibility with all upstream extensions and plugins.
 - **Removed extensions**: caption, gallery, translate, and their backend endpoints have been deleted. Users who depend on these features should use the upstream version.
+- **LAN chat is experimental**: The LAN chat feature is a work-in-progress with no test coverage; it may change or be removed in future releases.
 - **Limited model coverage**: The thinking mode toggle is primarily validated against DeepSeek. Other domestic models (e.g., Qwen) are adapted on an as-needed basis without comprehensive regression testing.
 - **Security**: By default, only localhost is listened on. If you need external access, make sure to configure `listen`, the whitelist, CSRF protection, and Basic Auth, and assess the risks.
 
