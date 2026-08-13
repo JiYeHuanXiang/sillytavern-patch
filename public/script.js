@@ -74,7 +74,6 @@ import {
     getGroupCharacterCardsLazy,
     getGroupDepthPrompts,
     applyDirectedSendToLastMessage,
-    showMessageVisibilityPopup,
     updateMessageHiddenBadge,
 } from './scripts/group-chats.js';
 
@@ -198,7 +197,6 @@ import { initMacroAutoComplete } from './scripts/autocomplete/MacroAutoComplete.
 import {
     tag_map,
     TAG_FOLDER_TYPES,
-    TAG_FOLDER_DEFAULT_TYPE,
     tags,
     filterByTagState,
     isBogusFolder,
@@ -4808,7 +4806,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
                     x.is_system ||
                     x.original_avatar === _currentAvatar ||
                     // Fallback for legacy messages without original_avatar: match by name
-                    (!x.original_avatar && typeof x.name === 'string' && _currentName && x.name === _currentName)
+                    (!x.original_avatar && typeof x.name === 'string' && _currentName && x.name === _currentName),
                 );
             }
         }

@@ -13,11 +13,19 @@ import {
     FEATHERLESS_KEYS,
     OPENAI_KEYS,
 } from '../../constants.js';
-import { forwardFetchResponse, trimV1, getConfigValue } from '../../util.js';
+import { forwardFetchResponse, trimV1, getConfigValue, combineAbortSignals } from '../../util.js';
+import { assertSafeFetchUrl } from '../../url-safety.js';
 import { setAdditionalHeaders } from '../../additional-headers.js';
 import { createHash } from 'node:crypto';
 
 export const router = express.Router();
+
+/**
+ * Server-side timeout (ms) for upstream generation requests. 0 = disabled.
+ * Combined with the client-disconnect AbortController via combineAbortSignals
+ * so a fetch aborts on whichever fires first.
+ */
+const REQUEST_TIMEOUT_MS = getConfigValue('requestTimeout', 0, 'number');
 
 /**
  * Special boy's steaming routine. Wrap this abomination into proper SSE stream.
@@ -107,6 +115,7 @@ router.post('/status', async function (request, response) {
 
         console.debug('Trying to connect to API', request.body);
         const baseUrl = trimV1(request.body.api_server);
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
 
         const args = {
             headers: { 'Content-Type': 'application/json' },
@@ -236,6 +245,7 @@ router.post('/props', async function (request, response) {
 
     try {
         const baseUrl = trimV1(request.body.api_server);
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
         const args = {
             headers: {},
         };
@@ -279,6 +289,7 @@ router.post('/generate', async function (request, response) {
 
         const apiType = request.body.api_type;
         const baseUrl = request.body.api_server;
+        await assertSafeFetchUrl(trimV1(baseUrl), { allowPrivate: true });
         console.debug(request.body);
 
         const controller = new AbortController();
@@ -327,8 +338,7 @@ router.post('/generate', async function (request, response) {
             method: 'POST',
             body: JSON.stringify(request.body),
             headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            timeout: 0,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         setAdditionalHeaders(request, args, baseUrl);
@@ -448,6 +458,7 @@ ollama.post('/download', async function (request, response) {
 
         const name = request.body.name;
         const url = String(request.body.api_server).replace(/\/$/, '');
+        await assertSafeFetchUrl(url, { allowPrivate: true });
         console.debug('Pulling Ollama model:', name);
 
         const fetchResponse = await fetch(`${url}/api/pull`, {
@@ -480,6 +491,7 @@ ollama.post('/caption-image', async function (request, response) {
 
         console.debug('Ollama caption request:', request.body);
         const baseUrl = trimV1(request.body.server_url);
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
 
         const fetchResponse = await fetch(`${baseUrl}/api/generate`, {
             method: 'POST',
@@ -526,6 +538,7 @@ llamacpp.post('/props', async function (request, response) {
 
         console.debug('LlamaCpp props request:', request.body);
         const baseUrl = trimV1(request.body.server_url);
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
 
         const fetchResponse = await fetch(`${baseUrl}/props`, {
             method: 'GET',
@@ -557,6 +570,7 @@ llamacpp.post('/slots', async function (request, response) {
 
         console.debug('LlamaCpp slots request:', request.body);
         const baseUrl = trimV1(request.body.server_url);
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
 
         let fetchResponse;
         if (request.body.action === 'info') {
@@ -600,12 +614,12 @@ const tabby = express.Router();
 tabby.post('/download', async function (request, response) {
     try {
         const baseUrl = String(request.body.api_server).replace(/\/$/, '');
+        await assertSafeFetchUrl(baseUrl, { allowPrivate: true });
 
         const args = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request.body),
-            timeout: 0,
         };
 
         setAdditionalHeaders(request, args, baseUrl);

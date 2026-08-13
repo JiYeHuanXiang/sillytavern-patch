@@ -986,6 +986,35 @@ export function isValidUrl(url) {
 }
 
 /**
+ * Combine a caller-controlled AbortSignal (e.g. one wired to the client socket
+ * 'close' event) with an optional server-side timeout. Returns null when
+ * neither source is active so callers can fall back to existing behaviour.
+ *
+ * Node >= 20 provides AbortSignal.any() and AbortSignal.timeout(), both used
+ * here. The fetch aborts on whichever fires first; the resulting error is a
+ * TimeoutError (server timeout) or AbortError (client disconnect).
+ * @param {AbortSignal} [signal] Caller-provided signal (e.g. client-disconnect)
+ * @param {number} [timeoutMs] Server-side timeout in ms; <= 0 disables it
+ * @returns {AbortSignal|null} Combined signal, or null when neither is active
+ */
+export function combineAbortSignals(signal, timeoutMs) {
+    const signals = [];
+    if (signal) {
+        signals.push(signal);
+    }
+    if (timeoutMs && timeoutMs > 0) {
+        signals.push(AbortSignal.timeout(timeoutMs));
+    }
+    if (signals.length === 0) {
+        return signal ?? null;
+    }
+    if (signals.length === 1) {
+        return signals[0];
+    }
+    return AbortSignal.any(signals);
+}
+
+/**
  * removes starting `[` or ending `]` from hostname.
  * @param {string} hostname hostname to use
  * @returns {string} hostname plus the modifications
@@ -1705,6 +1734,29 @@ export async function findPngFilesRecursiveAsync(dirPath, seen = new Set()) {
     }
 
     return result;
+}
+
+/**
+ * Invalidate cached directory listings that overlap dirPath.
+ *
+ * The cache is keyed by directory path and fingerprinted with the top-level
+ * dir mtime, which means a mutation inside a subdirectory does NOT change the
+ * parent's mtime and the cached full-tree result stays stale forever. Call this
+ * after any character-card write/delete/rename under the characters directory
+ * so the next /api/characters/all scan picks up filesystem changes.
+ *
+ * Clears: the entry for dirPath itself, plus any cached ancestor (a mutation
+ * inside a subdir invalidates the parent's cached full-tree result) or descendant.
+ * @param {string} dirPath Directory whose cached listing(s) should be dropped
+ */
+export function invalidateDirListCache(dirPath) {
+    if (!dirPath) return;
+    const target = path.resolve(dirPath);
+    for (const key of dirListCache.keys()) {
+        if (key === target || isPathUnderParent(target, key) || isPathUnderParent(key, target)) {
+            dirListCache.delete(key);
+        }
+    }
 }
 
 /**

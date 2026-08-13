@@ -6,6 +6,7 @@ import FormData from 'form-data';
 import express from 'express';
 
 import { getConfigValue, mergeObjectWithYaml, excludeKeysByYaml, trimV1, delay } from '../util.js';
+import { assertSafeFetchUrl } from '../url-safety.js';
 import { setAdditionalHeaders } from '../additional-headers.js';
 import { readSecret, SECRET_KEYS } from './secrets.js';
 import { AIMLAPI_HEADERS, OPENROUTER_HEADERS, SILICONFLOW_ENDPOINT, ZAI_ENDPOINT } from '../constants.js';
@@ -248,6 +249,7 @@ router.post('/caption-image', async (request, response) => {
         setAdditionalHeaders(request, { headers }, apiUrl);
         console.debug('Multimodal captioning request', body);
 
+        await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
         const result = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -646,6 +648,7 @@ router.post('/generate-image', async (request, response) => {
         const forwardBody = { ...request.body };
         delete forwardBody.reverse_proxy;
 
+        await assertSafeFetchUrl(url, { allowPrivate: true });
         const result = await fetch(url, {
             method: 'POST',
             headers: {

@@ -31,7 +31,9 @@ import {
     color,
     trimTrailingSlash,
     flattenSchema,
+    combineAbortSignals,
 } from '../../util.js';
+import { assertSafeFetchUrl } from '../../url-safety.js';
 import {
     convertClaudeMessages,
     convertGooglePrompt,
@@ -105,6 +107,13 @@ const cachingAtDepth = (() => {
     return Number.isInteger(value) && value >= 0 ? value : -1;
 })();
 const enableAdaptiveThinking = getConfigValue('claude.enableAdaptiveThinking', true, 'boolean');
+
+/**
+ * Server-side timeout (ms) for upstream generation requests. 0 = disabled.
+ * Combined with the client-disconnect AbortController via combineAbortSignals
+ * so a fetch aborts on whichever fires first.
+ */
+const REQUEST_TIMEOUT_MS = getConfigValue('requestTimeout', 0, 'number');
 
 /**
  * Cache for cacheable (writing) OpenRouter model IDs.
@@ -206,12 +215,36 @@ function setJsonObjectFormat(bodyParams, messages, jsonSchema) {
 }
 
 /**
+ * Resolve the DeepSeek "thinking" toggle for a request.
+ *
+ * Consolidates the previously-duplicated injection sites so the
+ * include_reasoning semantics are uniform. The old universal-fallback
+ * site used `include_reasoning === false`, which diverged from the other
+ * three sites' `!include_reasoning` form whenever include_reasoning was
+ * undefined (e.g. third-party callers / direct API use) — the universal
+ * branch would then fail to disable thinking while the native/OpenRouter/
+ * SiliconFlow branches disabled it.
+ *
+ * @param {string} model Model id (checked against /^deepseek-/)
+ * @param {boolean|undefined} includeReasoning request.body.include_reasoning
+ * @param {string|undefined} reasoningEffort request.body.reasoning_effort
+ * @returns {{type:'enabled'|'disabled'}|null} the thinking object, or null when not a DeepSeek model
+ */
+function resolveDeepSeekThinking(model, includeReasoning, reasoningEffort) {
+    if (!/^deepseek-/.test(model)) return null;
+    const hasActiveEffort = reasoningEffort && reasoningEffort !== 'auto' && reasoningEffort !== 'disabled';
+    const shouldDisable = reasoningEffort === 'disabled' || (!hasActiveEffort && !includeReasoning);
+    return { type: shouldDisable ? 'disabled' : 'enabled' };
+}
+
+/**
  * Sends a request to Claude API.
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
  */
 async function sendClaudeRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_CLAUDE).toString();
+    await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.CLAUDE, request.body.secret_id);
     const divider = '-'.repeat(process.stdout.columns);
 
@@ -375,7 +408,7 @@ async function sendClaudeRequest(request, response) {
 
         const generateResponse = await fetch(apiUrl + '/messages', {
             method: 'POST',
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
             body: JSON.stringify(requestBody),
             headers: {
                 'Content-Type': 'application/json',
@@ -450,6 +483,8 @@ async function sendMakerSuiteRequest(request, response) {
         authHeader = `Bearer ${apiKey}`;
         authType = 'api_key';
     }
+
+    await assertSafeFetchUrl(apiUrl.toString(), { allowPrivate: true });
 
     const model = String(request.body.model);
     const stream = Boolean(request.body.stream);
@@ -691,7 +726,7 @@ async function sendMakerSuiteRequest(request, response) {
             body: JSON.stringify(body),
             method: 'POST',
             headers: headers,
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         });
 
         if (stream) {
@@ -800,7 +835,7 @@ async function sendAI21Request(request, response) {
             Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
     };
 
     console.debug('AI21 request:', body);
@@ -837,6 +872,7 @@ async function sendAI21Request(request, response) {
  */
 async function sendMistralAIRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_MISTRAL).toString();
+    await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.MISTRALAI, request.body.secret_id);
 
     if (!apiKey) {
@@ -890,8 +926,7 @@ async function sendMistralAIRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
-            timeout: 0,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('MisralAI request:', requestBody);
@@ -989,8 +1024,7 @@ async function sendCohereRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
-            timeout: 0,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         const apiUrl = API_COHERE_V2 + '/chat';
@@ -1027,6 +1061,7 @@ async function sendCohereRequest(request, response) {
  */
 async function sendDeepSeekRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_DEEPSEEK).toString();
+    await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.DEEPSEEK, request.body.secret_id);
 
     if (!apiKey && !request.body.reverse_proxy) {
@@ -1080,8 +1115,8 @@ async function sendDeepSeekRequest(request, response) {
             bodyParams['reasoning_effort'] = request.body.reasoning_effort;
         }
 
-        const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
-        const disabledThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !request.body.include_reasoning);
+        // Model is always DeepSeek in this handler; resolve the unified toggle.
+        const thinking = resolveDeepSeekThinking(request.body.model, request.body.include_reasoning, request.body.reasoning_effort);
 
         const requestBody = {
             'messages': processedMessages,
@@ -1094,7 +1129,7 @@ async function sendDeepSeekRequest(request, response) {
             'top_p': request.body.top_p,
             'stop': request.body.stop,
             'seed': request.body.seed,
-            'thinking': { type: disabledThinking ? 'disabled' : 'enabled' },
+            'thinking': thinking,
             ...bodyParams,
         };
 
@@ -1105,7 +1140,7 @@ async function sendDeepSeekRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('DeepSeek request:', requestBody);
@@ -1142,6 +1177,7 @@ async function sendDeepSeekRequest(request, response) {
  */
 async function sendXaiRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_XAI).toString();
+    await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.XAI, request.body.secret_id);
 
     if (!apiKey && !request.body.reverse_proxy) {
@@ -1211,7 +1247,7 @@ async function sendXaiRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('xAI request:', requestBody);
@@ -1316,7 +1352,7 @@ async function sendAimlapiRequest(request, response) {
                 ...AIMLAPI_HEADERS,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('AI/ML API request:', requestBody);
@@ -1428,7 +1464,7 @@ async function sendElectronHubRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('Electron Hub request:', requestBody);
@@ -1529,7 +1565,7 @@ async function sendChutesRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('Chutes request:', requestBody);
@@ -1610,7 +1646,7 @@ async function sendMinimaxRequest(request, response) {
                 'Authorization': 'Bearer ' + apiKey,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('MiniMax request:', requestBody);
@@ -1660,6 +1696,7 @@ async function sendAzureOpenAIRequest(request, response) {
     const url = new URL(`/openai/deployments/${azure_deployment_name}/chat/completions`, azure_base_url);
     url.searchParams.set('api-version', azure_api_version);
     const endpointUrl = url.toString();
+    await assertSafeFetchUrl(endpointUrl, { allowPrivate: true });
 
     // Create the base payload with all standard parameters
     const apiRequestBody = /** @type {any} */ ({});
@@ -1703,7 +1740,7 @@ async function sendAzureOpenAIRequest(request, response) {
             'api-key': apiKey,
         },
         body: JSON.stringify(apiRequestBody),
-        signal: controller.signal,
+        signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
     };
 
     console.info(`Sending request to Azure OpenAI: ${endpointUrl}`);
@@ -2174,6 +2211,30 @@ router.post('/generate', async function (request, response) {
             request.body.json_schema.value = flattenSchema(request.body.json_schema.value, request.body.chat_completion_source);
         }
 
+        // Thinking-mode normalization for models that don't support fully
+        // disabling thinking via the {"thinking":{"type":"disabled"}} format.
+        // Only DeepSeek-family models support that format (via resolveDeepSeekThinking),
+        // and a few sources use their own thinking toggle (Moonshot/ZAI/SiliconFlow),
+        // or budget-based reasoning (Claude/Google) that never reads reasoning_effort.
+        // For everything else, when the user explicitly requests "disabled"
+        // (reasoning_effort === 'disabled'), map it to the minimum depth 'low' so
+        // behaviour is as close to "off" as the model allows.
+        if (request.body.reasoning_effort === 'disabled') {
+            const _usesThinkingToggle = /^deepseek-/.test(request.body.model)
+                || [
+                    CHAT_COMPLETION_SOURCES.DEEPSEEK,
+                    CHAT_COMPLETION_SOURCES.MOONSHOT,
+                    CHAT_COMPLETION_SOURCES.ZAI,
+                    CHAT_COMPLETION_SOURCES.SILICONFLOW,
+                    CHAT_COMPLETION_SOURCES.CLAUDE,
+                    CHAT_COMPLETION_SOURCES.MAKERSUITE,
+                    CHAT_COMPLETION_SOURCES.VERTEXAI,
+                ].includes(request.body.chat_completion_source);
+            if (!_usesThinkingToggle) {
+                request.body.reasoning_effort = 'low';
+            }
+        }
+
         switch (request.body.chat_completion_source) {
             case CHAT_COMPLETION_SOURCES.CLAUDE: return await sendClaudeRequest(request, response);
             case CHAT_COMPLETION_SOURCES.AI21: return await sendAI21Request(request, response);
@@ -2222,22 +2283,19 @@ router.post('/generate', async function (request, response) {
             // OpenRouter needs to pass the Referer and X-Title: https://openrouter.ai/docs#requests
             headers = { ...OPENROUTER_HEADERS };
             const includeReasoning = Boolean(request.body.include_reasoning);
-            
+
             // Check if using DeepSeek model through OpenRouter
             const isDeepSeekModel = /^deepseek-/.test(request.body.model);
-            
+
             bodyParams = {
                 transforms: getOpenRouterTransforms(request),
                 plugins: getOpenRouterPlugins(request),
             };
-            
+
             // For DeepSeek models, use thinking parameter directly
             if (isDeepSeekModel) {
-                const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
-                const disableThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !includeReasoning);
-                bodyParams['thinking'] = {
-                    type: disableThinking ? 'disabled' : 'enabled',
-                };
+                const _thinking = resolveDeepSeekThinking(request.body.model, includeReasoning, request.body.reasoning_effort);
+                bodyParams['thinking'] = _thinking;
                 console.debug('DeepSeek model detected, setting thinking:', bodyParams.thinking);
             } else {
                 // For other models, use reasoning.exclude
@@ -2500,22 +2558,19 @@ router.post('/generate', async function (request, response) {
             apiUrl = defaultApiUrl;
             apiKey = readSecret(request.user.directories, SECRET_KEYS.SILICONFLOW, request.body.secret_id);
             headers = {};
-            
+
             // Check if using DeepSeek model
             const isDeepSeekModel = /^deepseek-/.test(request.body.model);
-            
+
             bodyParams = {};
-            
+
             // For DeepSeek models, add thinking parameter
             if (isDeepSeekModel) {
-                const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
-                const disableThinking = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && !request.body.include_reasoning);
-                bodyParams['thinking'] = {
-                    type: disableThinking ? 'disabled' : 'enabled',
-                };
+                const _thinking = resolveDeepSeekThinking(request.body.model, request.body.include_reasoning, request.body.reasoning_effort);
+                bodyParams['thinking'] = _thinking;
                 console.debug('SiliconFlow DeepSeek model detected, setting thinking:', bodyParams.thinking);
             }
-            
+
             if (request.body.json_schema) {
                 setJsonObjectFormat(bodyParams, request.body.messages, request.body.json_schema);
             }
@@ -2573,6 +2628,10 @@ router.post('/generate', async function (request, response) {
             `${apiUrl}/completions` :
             `${apiUrl}/chat/completions`;
 
+        // SSRF guard for the user-configurable API URL (custom_url / reverse_proxy).
+        // allowPrivate=true so local inference backends (Ollama/etc. on 127.0.0.1) keep working.
+        await assertSafeFetchUrl(endpointUrl, { allowPrivate: true });
+
         const controller = new AbortController();
         request.socket.removeAllListeners('close');
         request.socket.on('close', function () {
@@ -2614,17 +2673,13 @@ router.post('/generate', async function (request, response) {
             ...bodyParams,
         };
 
-        // Universal DeepSeek thinking control
-        const isDeepSeekModel = /^deepseek-/.test(request.body.model);
-        if (isDeepSeekModel && !requestBody.thinking) {
-            const hasActiveEffort = request.body.reasoning_effort && request.body.reasoning_effort !== 'auto' && request.body.reasoning_effort !== 'disabled';
-            const shouldDisable = request.body.reasoning_effort === 'disabled' || (!hasActiveEffort && request.body.include_reasoning === false);
-            if (shouldDisable) {
-                requestBody['thinking'] = { type: 'disabled' };
-                console.debug('Universal DeepSeek thinking control: disabled thinking for', request.body.model);
-            } else if (hasActiveEffort && !request.body.include_reasoning) {
-                requestBody['thinking'] = { type: 'enabled' };
-                console.debug('Universal DeepSeek thinking control: enabled thinking for', request.body.model, '(reasoning effort override)');
+        // Universal thinking mode control for DeepSeek-family models.
+        // (Non-DeepSeek "disabled" is already coerced to 'low' before dispatch;
+        //  models that don't support {thinking:{type}} keep using reasoning_effort.)
+        if (!requestBody.thinking) {
+            const _thinking = resolveDeepSeekThinking(request.body.model, request.body.include_reasoning, request.body.reasoning_effort);
+            if (_thinking) {
+                requestBody['thinking'] = _thinking;
             }
         }
 
@@ -2641,7 +2696,7 @@ router.post('/generate', async function (request, response) {
                 ...headers,
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
         };
 
         console.debug('Chat Completion request:', requestBody);

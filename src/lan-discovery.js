@@ -19,24 +19,6 @@ let isStarted = false;
 const DISCOVERY_TIMEOUT_MS = 30_000; // Remove instances not seen for 30s
 
 /**
- * Gets all non-internal IPv4 addresses of the machine.
- * @returns {string[]}
- */
-function getLocalIpAddresses() {
-    const interfaces = os.networkInterfaces();
-    const addresses = [];
-    for (const iface of Object.values(interfaces)) {
-        if (!iface) continue;
-        for (const info of iface) {
-            if (info.family === 'IPv4' && !info.internal) {
-                addresses.push(info.address);
-            }
-        }
-    }
-    return addresses;
-}
-
-/**
  * Encodes a DNS name into the buffer format (length-prefixed labels).
  * @param {string} name
  * @returns {Buffer}

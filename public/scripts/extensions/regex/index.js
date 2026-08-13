@@ -1632,7 +1632,7 @@ async function checkCharEmbeddedRegexScripts() {
 
                         if (invalidScripts.length > 0) {
                             const invalidNames = invalidScripts.map(({ script, index }) =>
-                                escapeHtml(script?.scriptName || `#${index + 1}`)
+                                escapeHtml(script?.scriptName || `#${index + 1}`),
                             ).join('、');
                             const warningHtml = `<div class="m-b-1" style="margin-top:10px; padding:8px; border:1px solid var(--SmartThemeQuoteColor); border-radius:5px;">
                                 <strong>⚠ 检测到不规范的脚本：</strong><br>

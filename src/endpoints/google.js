@@ -6,32 +6,10 @@ import crypto from 'node:crypto';
 import { readSecret, SECRET_KEYS } from './secrets.js';
 import { GEMINI_SAFETY, VERTEX_SAFETY } from '../constants.js';
 import { getConfigValue, trimTrailingSlash } from '../util.js';
+import { assertSafeFetchUrl } from '../url-safety.js';
 
 const API_MAKERSUITE = 'https://generativelanguage.googleapis.com';
 const API_VERTEX_AI = 'https://us-central1-aiplatform.googleapis.com';
-
-function createWavHeader(dataSize, sampleRate, numChannels = 1, bitsPerSample = 16) {
-    const header = Buffer.alloc(44);
-    header.write('RIFF', 0);
-    header.writeUInt32LE(36 + dataSize, 4);
-    header.write('WAVE', 8);
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(sampleRate * numChannels * bitsPerSample / 8, 28);
-    header.writeUInt16LE(numChannels * bitsPerSample / 8, 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write('data', 36);
-    header.writeUInt32LE(dataSize, 40);
-    return header;
-}
-
-function createCompleteWavFile(pcmData, sampleRate) {
-    const header = createWavHeader(pcmData.length, sampleRate);
-    return Buffer.concat([header, pcmData]);
-}
 
 // Vertex AI authentication helper functions
 export async function getVertexAIAuth(request) {
@@ -221,6 +199,9 @@ export async function getGoogleApiConfig(request, model, endpoint = 'generateCon
         url = `${baseUrl}/models/${model}:${endpoint}`;
         headers['x-goog-api-key'] = apiKey;
     }
+
+    // SSRF guard for the user-configurable Google API URL (reverse_proxy).
+    await assertSafeFetchUrl(url, { allowPrivate: true });
 
     return { url, headers, apiName, baseUrl, safetySettings };
 }

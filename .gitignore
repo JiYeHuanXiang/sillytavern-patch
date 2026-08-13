@@ -60,8 +60,7 @@ public/error/
 yarn.lock
 *.code-workspace
 test-results/
-/.github/workflows/
-.reasonix/*
+.zcode/*
 # AI 辅助工具元数据 / 本地配置（非项目文件）
 .gemini/
 .lingma/

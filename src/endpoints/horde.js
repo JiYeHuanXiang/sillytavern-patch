@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import express from 'express';
 import { AIHorde } from '@zeldafan0225/ai_horde';
-import { getVersion, delay, Cache } from '../util.js';
+import { getVersion, Cache } from '../util.js';
 import { readSecret, SECRET_KEYS } from './secrets.js';
 
 const ANONYMOUS_KEY = '0000000000';
