@@ -6370,12 +6370,12 @@
                                 <div class="lan-chat-section">
                                     <div class="lan-chat-status-row">
                                         <input id="lan_chat_nickname" type="text" class="text_pole textarea_compact" placeholder="昵称" maxlength="50" style="width:100px;">
-                                        <input id="lan_chat_nickname" type="text" class="text_pole textarea_compact" placeholder="昵称" maxlength="50" style="width:100px;">
+                                        <span id="lan_chat_status" style="color:#f44336;">● 未连接</span>
                                     </div>
 
-                                    <!-- Host: Create room -->
+                                    <!-- Host: Create / Disconnect -->
                                     <div class="flex-container flexGap5">
-                                        <div id="lan_chat_disconnect" class="menu_button fa-solid fa-power-off" title="断开连接" style="display:none;"></div>
+                                        <div id="lan_chat_create_room" class="menu_button" style="text-align:center;">创建房间</div>
                                         <div id="lan_chat_disconnect" class="menu_button fa-solid fa-power-off" title="断开连接" style="display:none;"></div>
                                     </div>
 
@@ -6383,7 +6383,7 @@
                                     <div id="lan_chat_room_info" style="display:none;">
                                         <div class="lan-chat-online-users" id="lan_chat_online_users"></div>
                                         <div class="lan-chat-link-row">
-                                            <div id="lan_chat_copy_link" class="menu_button menu_button_icon fa-solid fa-copy" title="复制链接"></div>
+                                            <input id="lan_chat_share_link" type="text" class="text_pole textarea_compact" placeholder="分享链接" readonly>
                                             <div id="lan_chat_copy_link" class="menu_button menu_button_icon fa-solid fa-copy" title="复制链接"></div>
                                         </div>
                                     </div>
@@ -6392,7 +6392,6 @@
                                     <div class="lan-chat-join-row">
                                         <input id="lan_chat_join_room_id" type="text" class="text_pole textarea_compact" placeholder="房间 ID">
                                         <input id="lan_chat_join_token" type="text" class="text_pole textarea_compact" placeholder="令牌">
-                                        <div id="lan_chat_join_btn" class="menu_button" style="text-align:center;">加入</div>
                                         <div id="lan_chat_join_btn" class="menu_button" style="text-align:center;">加入</div>
                                     </div>
                                 </div>
