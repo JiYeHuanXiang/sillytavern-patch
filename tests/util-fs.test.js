@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, test, expect, jest } from '@jest/globa
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getImages } from '../src/util';
+import { getImages, findPngFilesRecursiveAsync, invalidateDirListCache } from '../src/util';
 import { MEDIA_REQUEST_TYPE } from '../src/constants';
 
 describe('getImages', () => {
@@ -132,5 +132,63 @@ describe('getImages', () => {
     test('returns empty array for an empty directory', () => {
         expect(getImages(tmpDir, 'name')).toEqual([]);
         expect(getImages(tmpDir, 'date')).toEqual([]);
+    });
+});
+
+describe('dirListCache invalidation (subdirectory staleness)', () => {
+    let tmpRoot;
+
+    beforeEach(() => {
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'st-dirlist-cache-'));
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+        // Drop any cache entries left over from this test so the next run starts clean.
+        invalidateDirListCache(tmpRoot);
+    });
+
+    test('adding a PNG inside a subdirectory is visible after invalidation', async () => {
+        const sub = path.join(tmpRoot, 'sub');
+        fs.mkdirSync(sub, { recursive: true });
+        fs.writeFileSync(path.join(tmpRoot, 'top.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        fs.writeFileSync(path.join(sub, 'nested.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+        // Prime the cache for the full tree.
+        let files = await findPngFilesRecursiveAsync(tmpRoot);
+        expect(files.length).toBe(2);
+
+        // Add a second PNG inside the subdirectory. The parent dir's mtime does
+        // NOT change on most filesystems, so without invalidation the cached
+        // result would miss the new file.
+        fs.writeFileSync(path.join(sub, 'nested2.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+        // Stale cache hit (buggy path) would still return 2.
+        const stale = await findPngFilesRecursiveAsync(tmpRoot);
+        if (stale.length === 3) {
+            // Filesystem reports the parent mtime as changed (some platforms do);
+            // the point of this test is the post-invalidation correctness, so just
+            // confirm invalidation doesn't break it and move on.
+            invalidateDirListCache(tmpRoot);
+            const after = await findPngFilesRecursiveAsync(tmpRoot);
+            expect(after.length).toBe(3);
+            return;
+        }
+        expect(stale.length).toBe(2);
+
+        // After invalidation the new file must appear.
+        invalidateDirListCache(tmpRoot);
+        files = await findPngFilesRecursiveAsync(tmpRoot);
+        expect(files.length).toBe(3);
+        expect(files.map(f => path.basename(f)).sort()).toEqual(['nested.png', 'nested2.png', 'top.png']);
+    });
+
+    test('invalidation is a no-op for an unrelated directory', async () => {
+        fs.writeFileSync(path.join(tmpRoot, 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        const before = await findPngFilesRecursiveAsync(tmpRoot);
+        expect(before).toEqual(['a.png']);
+        invalidateDirListCache(path.join(os.tmpdir(), 'some-other-unrelated-dir'));
+        const after = await findPngFilesRecursiveAsync(tmpRoot);
+        expect(after).toEqual(['a.png']);
     });
 });

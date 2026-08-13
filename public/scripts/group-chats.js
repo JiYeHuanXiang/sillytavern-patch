@@ -1038,6 +1038,10 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
         return Promise.resolve();
     }
 
+    // Snapshot the global connection so per-member profile switches don't leak out.
+    // Declared before the try so the finally block can access it even if the try
+    // throws before the snapshot is taken (restoreConnection tolerates undefined).
+    let connectionSnapshot = undefined;
     try {
         await unshallowGroupMembers(selected_group);
 
@@ -1137,7 +1141,7 @@ async function generateGroupWrapper(byAutoMode, type = null, params = {}) {
         await eventSource.emit(event_types.GROUP_WRAPPER_STARTED, { selected_group, type });
 
         // Snapshot the global connection so per-member profile switches don't leak out
-        const connectionSnapshot = snapshotConnection();
+        connectionSnapshot = snapshotConnection();
 
         // now the real generation begins: cycle through every activated character
         for (const chId of activatedMembers) {
@@ -2315,7 +2319,6 @@ async function createGroup() {
         auto_mode_delay: autoModeDelay,
         member_profiles: {},
         strict_rotation_cursor: 0,
-        turn_isolation: turnIsolation,
     };
 
     const createGroupResponse = await fetch('/api/groups/create', {
@@ -2948,7 +2951,7 @@ export function updateMessageHiddenBadge(messageId) {
         return;
     }
     if (!$badge.length) {
-        $badge = $(`<i class="mes_hidden_badge fa-solid fa-user-slash" title=""></i>`);
+        $badge = $('<i class="mes_hidden_badge fa-solid fa-user-slash" title=""></i>');
         $mes.find('.ch_name .name_text').after($badge);
     }
     const names = hidden.map(av => characters.find(c => c.avatar === av)?.name).filter(Boolean);

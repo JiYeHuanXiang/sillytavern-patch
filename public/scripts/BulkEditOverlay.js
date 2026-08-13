@@ -156,7 +156,7 @@ class CharacterContextMenu {
         }
 
         const zipFileName = response.headers.get('Content-Disposition')?.match(/filename="?(.+?)"?(?:;|$)/)?.[1]
-            ?? `characters_export.zip`;
+            ?? 'characters_export.zip';
         const blob = await response.blob();
         download(blob, zipFileName, 'application/zip');
     };

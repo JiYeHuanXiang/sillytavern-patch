@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import { forwardFetchResponse } from '../util.js';
+import { assertSafeFetchUrl } from '../url-safety.js';
 
 /**
  * Middleware to proxy requests to a different domain
@@ -13,6 +14,15 @@ export default async function corsProxyMiddleware(req, res) {
     const serverUrl = req.protocol + '://' + req.get('host');
     if (url.startsWith(serverUrl)) {
         return res.status(400).send('Circular requests are not allowed');
+    }
+
+    // SSRF protection: the CORS proxy has no legitimate local target, so private
+    // / loopback / link-local / cloud-metadata destinations are rejected. This
+    // also rejects non-http(s) schemes (file:, gopher:, data:, ...).
+    try {
+        await assertSafeFetchUrl(url, { allowPrivate: false });
+    } catch (error) {
+        return res.status(400).send(`Blocked by SSRF protection: ${error.message}`);
     }
 
     try {

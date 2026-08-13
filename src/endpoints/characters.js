@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 
 import express from 'express';
 import sanitize from 'sanitize-filename';
-import { sync as writeFileAtomicSync } from 'write-file-atomic';
+import writeFileAtomic from 'write-file-atomic';
 import yaml from 'yaml';
 import _ from 'lodash';
 import mime from 'mime-types';
@@ -16,7 +16,7 @@ import archiver from 'archiver';
 
 import { AVATAR_WIDTH, AVATAR_HEIGHT, DEFAULT_AVATAR_PATH } from '../constants.js';
 import { default as validateAvatarUrlMiddleware, getFileNameValidationFunction, forbiddenRegExp, isPathSafe } from '../middleware/validateFileName.js';
-import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements, findPngFilesRecursiveAsync } from '../util.js';
+import { deepMerge, humanizedDateTime, tryParse, MemoryLimitedMap, getConfigValue, mutateJsonString, clientRelativePath, getUniqueName, sanitizeSafeCharacterReplacements, findPngFilesRecursiveAsync, invalidateDirListCache } from '../util.js';
 import { TavernCardValidator } from '../validator/TavernCardValidator.js';
 import { parse, read, write, writeInPlace } from '../character-card-parser.js';
 import { readWorldInfoFile } from './worldinfo.js';
@@ -287,10 +287,10 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
 
         if (!needsImageProcessing && typeof inputFile === 'string') {
             try {
-                inputImage = fs.readFileSync(inputFile);
+                inputImage = await fsPromises.readFile(inputFile);
             } catch (readErr) {
                 console.warn(`Failed to read image: ${inputFile}. Using a fallback image.`, readErr);
-                inputImage = fs.readFileSync(DEFAULT_AVATAR_PATH);
+                inputImage = await fsPromises.readFile(DEFAULT_AVATAR_PATH);
             }
         } else {
             /**
@@ -320,7 +320,12 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         const outputImage = writeInPlace(inputImage, data);
         const outputImagePath = path.join(request.user.directories.characters, `${outputFile}.png`);
 
-        writeFileAtomicSync(outputImagePath, outputImage);
+        await writeFileAtomic(outputImagePath, outputImage);
+
+        // Drop the cached directory listing so a subsequent /api/characters/all
+        // scan reflects this write. Subdirectory writes don't bump the parent
+        // dir mtime, so without this the cache would serve stale results.
+        invalidateDirListCache(request.user.directories.characters);
 
         // Invalidate the character index entry for the written file. The next list load will see a
         // changed (mtimeMs/size) fingerprint and re-parse; we just mark dirty so the on-disk index
@@ -403,36 +408,12 @@ async function tryReadImage(imgPath, crop) {
     } catch (error) {
         // If it's an unsupported type of image (APNG) - just read the file as buffer
         console.error(`Failed to read image: ${imgPath}`, error);
-        return fs.readFileSync(imgPath);
+        return await fsPromises.readFile(imgPath);
     }
 }
 
 /**
- * calculateChatSize - Calculates the total chat size for a given character.
- *
- * @param  {string} charDir The directory where the chats are stored.
- * @return { {chatSize: number, dateLastChat: number} }         The total chat size.
- */
-const calculateChatSize = (charDir) => {
-    let chatSize = 0;
-    let dateLastChat = 0;
-
-    if (fs.existsSync(charDir)) {
-        const chats = fs.readdirSync(charDir);
-        if (Array.isArray(chats) && chats.length) {
-            for (const chat of chats) {
-                const chatStat = fs.statSync(path.join(charDir, chat));
-                chatSize += chatStat.size;
-                dateLastChat = Math.max(dateLastChat, chatStat.mtimeMs);
-            }
-        }
-    }
-
-    return { chatSize, dateLastChat };
-};
-
-/**
- * calculateChatSizeAsync - Async version of calculateChatSize.
+ * calculateChatSizeAsync - Calculates the total chat size for a given character.
  * Uses fs.promises to avoid blocking the event loop on slow I/O.
  *
  * @param  {string} charDir The directory where the chats are stored.
@@ -912,8 +893,8 @@ function convertWorldInfoToCharacterBook(name, entries) {
  * @returns {Promise<string>} Internal name of the character
  */
 async function importFromYaml(uploadPath, context, preservedFileName) {
-    const fileText = fs.readFileSync(uploadPath, 'utf8');
-    fs.unlinkSync(uploadPath);
+    const fileText = await fsPromises.readFile(uploadPath, 'utf8');
+    await fsPromises.unlink(uploadPath);
     const yamlData = yaml.parse(fileText);
     console.info('Importing from YAML');
     yamlData.name = sanitize(yamlData.name);
@@ -946,10 +927,10 @@ async function importFromYaml(uploadPath, context, preservedFileName) {
  * @returns {Promise<string>} Internal name of the character
  */
 async function importFromCharX(uploadPath, { request }, preservedFileName) {
-    const fileBuffer = fs.readFileSync(uploadPath);
+    const fileBuffer = await fsPromises.readFile(uploadPath);
     // Create a properly-sized ArrayBuffer (Node's buffer pool can cause oversized .buffer)
     const data = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
-    fs.unlinkSync(uploadPath);
+    await fsPromises.unlink(uploadPath);
 
     const parser = new CharXParser(data);
     const { card, avatar, auxiliaryAssets, extractedBuffers } = await parser.parse();
@@ -997,12 +978,12 @@ async function importFromByaf(uploadPath, { request }, preservedFileName) {
         /**
          * @param {Partial<ByafScenario>} scenario
         */
-        const createChatAsCurrentPersona = (scenario) => {
+        const createChatAsCurrentPersona = async (scenario) => {
             const chatName = sanitize(`${scenario.title || card.name} - ${humanizedDateTime()} imported.jsonl`, { replacement: sanitizeSafeCharacterReplacements });
             const filePath = path.join(request.user.directories.chats, path.basename(fileName), chatName);
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            writeFileAtomicSync(filePath, ByafParser.getChatFromScenario(scenario, request.body.user_name, card.name, byafData.chatBackgrounds), 'utf8');
+            await writeFileAtomic(filePath, ByafParser.getChatFromScenario(scenario, request.body.user_name, card.name, byafData.chatBackgrounds), 'utf8');
             console.log(`Created ${chatName} chat from BYAF import`);
             return chatName;
         };
@@ -1016,7 +997,7 @@ async function importFromByaf(uploadPath, { request }, preservedFileName) {
             const file = getUniqueName(baseName, (name) => fs.existsSync(path.join(filePath, `${name}${extension}`)));
             if (Buffer.isBuffer(bg.data)) {
                 const newFile = `${file}${extension}`;
-                writeFileAtomicSync(path.join(filePath, newFile), bg.data);
+                await writeFileAtomic(path.join(filePath, newFile), bg.data);
                 bg.name = clientRelativePath(request.user.directories.root, path.join(filePath, newFile)); // Update background name to the new file
                 console.log(`Created ${newFile} background from BYAF import`);
             }
@@ -1026,7 +1007,7 @@ async function importFromByaf(uploadPath, { request }, preservedFileName) {
         // Create chats for each scenario
         if (Array.isArray(byafData.scenarios)) {
             for (const scenario of byafData.scenarios) {
-                chats.push(createChatAsCurrentPersona(scenario));
+                chats.push(await createChatAsCurrentPersona(scenario));
             }
         }
 
@@ -1045,7 +1026,7 @@ async function importFromByaf(uploadPath, { request }, preservedFileName) {
             const extension = path.extname(icon.filename) || '.png';
             const file = getUniqueName(`${sanitize(icon.label, { replacement: sanitizeSafeCharacterReplacements }) || 'alt'}`, (name) => fs.existsSync(path.join(altImagesFolder, `${name}${extension}`)));
             if (Buffer.isBuffer(icon.image)) {
-                writeFileAtomicSync(path.join(altImagesFolder, `${file}${extension}`), icon.image);
+                await writeFileAtomic(path.join(altImagesFolder, `${file}${extension}`), icon.image);
                 console.log(`Created ${file}${extension} alternate icon from BYAF import`);
             }
         }
@@ -1064,8 +1045,8 @@ async function importFromByaf(uploadPath, { request }, preservedFileName) {
  * @returns {Promise<string>} Internal name of the character
  */
 async function importFromJson(uploadPath, { request }, preservedFileName) {
-    const data = fs.readFileSync(uploadPath, 'utf8');
-    fs.unlinkSync(uploadPath);
+    const data = await fsPromises.readFile(uploadPath, 'utf8');
+    await fsPromises.unlink(uploadPath);
 
     let jsonData = JSON.parse(data);
 
@@ -1168,7 +1149,7 @@ async function importFromPng(uploadPath, { request }, preservedFileName) {
         jsonData.create_date = new Date().toISOString();
         const char = JSON.stringify(jsonData);
         const result = await writeCharacterData(uploadPath, char, pngName, request);
-        fs.unlinkSync(uploadPath);
+        await fsPromises.unlink(uploadPath);
         return result ? pngName : '';
     } else if (jsonData.name !== undefined) {
         console.info('Found a v1 character file.');
@@ -1195,7 +1176,7 @@ async function importFromPng(uploadPath, { request }, preservedFileName) {
         char = convertToV2(char, request.user.directories);
         const charJSON = JSON.stringify(char);
         const result = await writeCharacterData(uploadPath, charJSON, pngName, request);
-        fs.unlinkSync(uploadPath);
+        await fsPromises.unlink(uploadPath);
         return result ? pngName : '';
     }
 
@@ -1226,7 +1207,7 @@ router.post('/create', getFileNameValidationFunction('file_name'), async functio
             const crop = tryParse(request.query.crop);
             const uploadPath = path.join(request.file.destination, request.file.filename);
             await writeCharacterData(uploadPath, char, internalName, request, crop);
-            fs.unlinkSync(uploadPath);
+            await fsPromises.unlink(uploadPath);
             return response.send(avatarName);
         }
     } catch (err) {
@@ -1266,12 +1247,13 @@ router.post('/rename', validateAvatarUrlMiddleware, async function (request, res
 
         // Rename chats folder
         if (fs.existsSync(oldChatsPath) && !fs.existsSync(newChatsPath)) {
-            fs.cpSync(oldChatsPath, newChatsPath, { recursive: true });
-            fs.rmSync(oldChatsPath, { recursive: true, force: true });
+            await fsPromises.cp(oldChatsPath, newChatsPath, { recursive: true });
+            await fsPromises.rm(oldChatsPath, { recursive: true, force: true });
         }
 
         // Remove the old character file
-        fs.unlinkSync(oldAvatarPath);
+        await fsPromises.unlink(oldAvatarPath);
+        invalidateDirListCache(request.user.directories.characters);
 
         // The index entry keyed under the old relative path is now stale; drop it and mark dirty so
         // the rename is reflected without waiting for the next /all prune.
@@ -1316,7 +1298,7 @@ router.post('/edit', validateAvatarUrlMiddleware, async function (request, respo
             const newAvatarPath = path.join(request.file.destination, request.file.filename);
             invalidateThumbnail(request.user.directories, 'avatar', request.body.avatar_url);
             await writeCharacterData(newAvatarPath, char, targetFile, request, crop);
-            fs.unlinkSync(newAvatarPath);
+            await fsPromises.unlink(newAvatarPath);
 
             // Bust cache to reload the new avatar
             cacheBuster.bust(request, response);
@@ -1357,7 +1339,7 @@ router.post('/edit-avatar', validateAvatarUrlMiddleware, async function (request
         await writeCharacterData(uploadPath, data, fileName, request, crop);
 
         // Remove uploaded temp file
-        fs.unlinkSync(uploadPath);
+        await fsPromises.unlink(uploadPath);
 
         // Reset images caches
         cacheBuster.bust(request, response);
@@ -1619,7 +1601,8 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
         return response.sendStatus(400);
     }
 
-    fs.unlinkSync(avatarPath);
+    await fsPromises.unlink(avatarPath);
+    invalidateDirListCache(request.user.directories.characters);
     invalidateThumbnail(request.user.directories, 'avatar', request.body.avatar_url);
 
     // Clear the memory cache and schedule disk-cache cleanup for the deleted card.
@@ -1720,7 +1703,7 @@ router.post('/chats', validateAvatarUrlMiddleware, async function (request, resp
             return response.send({ error: true });
         }
 
-        const files = fs.readdirSync(chatsDirectory, { withFileTypes: true });
+        const files = await fsPromises.readdir(chatsDirectory, { withFileTypes: true });
         const jsonFiles = files.filter(file => file.isFile() && path.extname(file.name) === '.jsonl').map(file => file.name);
 
         if (jsonFiles.length === 0) {
@@ -1847,7 +1830,8 @@ router.post('/duplicate', validateAvatarUrlMiddleware, async function (request, 
             suffix++;
         }
 
-        fs.copyFileSync(filename, newFilename);
+        await fsPromises.copyFile(filename, newFilename);
+        invalidateDirListCache(request.user.directories.characters);
         console.info(`${filename} was copied to ${newFilename}`);
 
         // The duplicated card has a fresh mtime, so the index will treat it as a miss and parse it

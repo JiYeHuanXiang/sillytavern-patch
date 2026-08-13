@@ -74,6 +74,15 @@ basicAuthUser:
   password: "password"
 # Enables CORS proxy middleware
 enableCorsProxy: false
+# SSRF protection for outbound fetches (CORS proxy + LLM API URLs).
+# Validates scheme (http/https only) and resolves hostnames to block
+# cloud-metadata endpoints and, for the CORS proxy, private/loopback addresses.
+# When false, validation is skipped (pre-protection behavior).
+ssrfProtection: true
+# Server-side timeout (ms) for upstream LLM generation requests. Aborts a
+# hung upstream so a single stuck request can't hold a connection forever.
+# 0 = disabled (current behavior). Example: 120000 for a 2-minute cap.
+requestTimeout: 0
 # CORS settings (applied to all routes)
 cors:
   # Enable or disable CORS middleware

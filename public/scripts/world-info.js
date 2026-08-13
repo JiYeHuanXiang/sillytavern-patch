@@ -5120,7 +5120,6 @@ export async function checkWorldInfo(chat, maxContext, isDryRun, globalScanData 
     // Appends from insertion order 999 to 1. Use unshift for this purpose
     // TODO (kingbri): Change to use WI Anchor positioning instead of separate top/bottom arrays
     [...allActivatedEntries.values()].sort(sortFn).forEach((entry) => {
-        const regexDepth = entry.position === world_info_position.atDepth ? (entry.depth ?? DEFAULT_DEPTH) : null;
         const content = entry.content;
 
         if (!content) {
@@ -5920,10 +5919,6 @@ export function installMobileWorldSearch(select) {
         return select.find('option').toArray();
     }
 
-    function getOptionForItem(item) {
-        return getOptions().find(o => o.value === item.dataset.value);
-    }
-
     function renderTrigger() {
         const options = getOptions();
         if (isMultiple) {
@@ -6536,7 +6531,7 @@ export function initWorldInfo() {
             placeholder: t`No Worlds active. Click here to select.`,
             allowClear: true,
             closeOnSelect: false,
-            sorter: function(data) {
+            sorter: function (data) {
                 // Sort: selected/enabled worlds first, preserving original order within each group
                 const empty = data.filter(d => d.id === '');
                 const selected = data.filter(d => d.id !== '' && d.selected);
