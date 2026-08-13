@@ -45,7 +45,6 @@ export const USER_DIRECTORY_TEMPLATE = Object.freeze({
     backups: 'backups',
     sysprompt: 'sysprompt',
     reasoning: 'reasoning',
-    lanChats: 'lan-chats',
 });
 
 /**

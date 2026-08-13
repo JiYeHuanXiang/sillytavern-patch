@@ -45,8 +45,6 @@ import { router as textCompletionsRouter } from './endpoints/backends/text-compl
 import { router as dataMaidRouter } from './endpoints/data-maid.js';
 import { router as backupsRouter } from './endpoints/backups.js';
 import { router as imageMetadataRouter } from './endpoints/image-metadata.js';
-import { router as lanChatRouter } from './endpoints/lan-chat.js';
-import { router as lanDiscoveryRouter } from './endpoints/lan-discovery-api.js';
 
 /**
  * @typedef {object} ServerStartupResult
@@ -177,8 +175,6 @@ export function setupPrivateEndpoints(app) {
     app.use('/api/data-maid', dataMaidRouter);
     app.use('/api/backups', backupsRouter);
     app.use('/api/image-metadata', imageMetadataRouter);
-    app.use('/api/lan-chat', lanChatRouter);
-    app.use('/api/lan-discovery', lanDiscoveryRouter);
 }
 
 /**

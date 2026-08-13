@@ -44,7 +44,6 @@
     <link rel="stylesheet" type="text/css" href="css/mobile-styles.css">
     <link rel="stylesheet" type="text/css" href="css/macros.css">
     <link rel="stylesheet" type="text/css" href="css/user.css">
-    <link rel="stylesheet" type="text/css" href="css/lan-chat.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <!-- Scripts are loaded at the end of the body to improve page load speed -->
 </head>
@@ -6360,45 +6359,6 @@
                             </div>
                         </div>
 
-                        <!-- LAN Co-op (局域网协作聊天) -->
-                        <div class="inline-drawer wide100p flexFlowColumn">
-                            <div id="lanCoopToggle" class="inline-drawer-toggle inline-drawer-header">
-                                <span>局域网协作聊天</span>
-                                <div class="fa-solid fa-circle-chevron-down inline-drawer-icon down"></div>
-                            </div>
-                            <div class="inline-drawer-content">
-                                <div class="lan-chat-section">
-                                    <div class="lan-chat-status-row">
-                                        <input id="lan_chat_nickname" type="text" class="text_pole textarea_compact" placeholder="昵称" maxlength="50" style="width:100px;">
-                                        <input id="lan_chat_nickname" type="text" class="text_pole textarea_compact" placeholder="昵称" maxlength="50" style="width:100px;">
-                                    </div>
-
-                                    <!-- Host: Create room -->
-                                    <div class="flex-container flexGap5">
-                                        <div id="lan_chat_disconnect" class="menu_button fa-solid fa-power-off" title="断开连接" style="display:none;"></div>
-                                        <div id="lan_chat_disconnect" class="menu_button fa-solid fa-power-off" title="断开连接" style="display:none;"></div>
-                                    </div>
-
-                                    <!-- Room info (shown after create/join) -->
-                                    <div id="lan_chat_room_info" style="display:none;">
-                                        <div class="lan-chat-online-users" id="lan_chat_online_users"></div>
-                                        <div class="lan-chat-link-row">
-                                            <div id="lan_chat_copy_link" class="menu_button menu_button_icon fa-solid fa-copy" title="复制链接"></div>
-                                            <div id="lan_chat_copy_link" class="menu_button menu_button_icon fa-solid fa-copy" title="复制链接"></div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Join room -->
-                                    <div class="lan-chat-join-row">
-                                        <input id="lan_chat_join_room_id" type="text" class="text_pole textarea_compact" placeholder="房间 ID">
-                                        <input id="lan_chat_join_token" type="text" class="text_pole textarea_compact" placeholder="令牌">
-                                        <div id="lan_chat_join_btn" class="menu_button" style="text-align:center;">加入</div>
-                                        <div id="lan_chat_join_btn" class="menu_button" style="text-align:center;">加入</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                     </div>
                     <div id="rm_character_import" class="right_menu" style="display: none;">
                         <form id="form_import" action="javascript:void(null);" method="post" enctype="multipart/form-data">
@@ -8265,7 +8225,6 @@
     <script type="module" src="lib/eventemitter.js"></script>
     <script type="module" src="scripts/i18n.js"></script>
     <script type="module" src="script.js"></script>
-    <script type="module" src="scripts/lan-chat.js"></script>
     <script>
         window.addEventListener('load', (event) => {
             const documentHeight = () => {

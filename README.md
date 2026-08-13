@@ -32,8 +32,6 @@ A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/Sill
   > Adds a "Render complete HTML pages as sandboxed preview" toggle (on by default) in user settings under message display. Full HTML pages in `first_mes` are embedded directly in the chat as iframes with source/preview switching; HTML code blocks in regular messages get a "Preview HTML" button that opens a popup with the rendered result.
   >
   > This also fixes the upstream behavior of dumping full HTML pages as plain code blocks.
-- **LAN Chat (Experimental)**: Communicate between multiple SillyTavern instances on the same local network.
-  > This is a work-in-progress feature with no test coverage — evaluate stability before relying on it. Enable it via the `lanDiscovery` setting in `config.yaml`; chat history can be persisted. The panel is integrated into the group chat interface.
 
 ### Trimming & Optimizations
 
@@ -98,7 +96,6 @@ The main config file is [`config.yaml`](config.yaml). Common options:
 - `whitelistMode` / `whitelist` — IP whitelist; by default only localhost is allowed
 - `listen` — whether to listen on all network interfaces (default `false`, localhost only)
 - `performance.characterListConcurrency` — character card scan concurrency
-- `lanDiscovery` — LAN chat discovery (experimental): `enabled` (default `true`) toggles local network chat; `persistHistory` saves chat history to `data/<user>/lan-chats/*.jsonl`
 - `securityOverride` / `disableCsrfProtection` — security toggles; **use with caution**
 
 > On first launch, a user data directory is automatically created under `data/` (default user `default-user`). Character cards go in `data/default-user/characters/` — subdirectories are supported.
@@ -145,7 +142,6 @@ sillytavern-patch/
 
 - **Not an official fork**: This repo does not guarantee synchronization with upstream nor compatibility with all upstream extensions and plugins.
 - **Removed extensions**: caption, gallery, translate, and their backend endpoints have been deleted. Users who depend on these features should use the upstream version.
-- **LAN chat is experimental**: The LAN chat feature is a work-in-progress with no test coverage; it may change or be removed in future releases.
 - **Limited model coverage**: The thinking mode toggle is primarily validated against DeepSeek. Other domestic models (e.g., Qwen) are adapted on an as-needed basis without comprehensive regression testing.
 - **Security**: By default, only localhost is listened on. If you need external access, make sure to configure `listen`, the whitelist, CSRF protection, and Basic Auth, and assess the risks.
 
