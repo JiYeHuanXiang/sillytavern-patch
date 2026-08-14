@@ -4,6 +4,30 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.1.2] - 2026-08-15
+
+### 🐛 修复
+
+- **备份文件名冲突（#5780）**：`backupChat` 原先用 `sanitize(name).replace(/[^a-z0-9]/gi,'_')`
+  把所有非 ASCII 字符（中/日/韩文角色名）塌缩成下划线，导致不同角色共用一个备份
+  清理前缀、互相覆盖/共占配额（数据丢失风险）。改为只做 `sanitize-filename`（保留
+  Unicode）+ 去前导点 + 空值兜底 `Unnamed`，每个角色独立备份命名空间。
+
+- **测试目录 ESLint 配置**：删除遗留的 `tests/.eslintrc.js`（CJS 语法被
+  `"type":"module"` 误当 ESM 加载，报 "module is not defined"），让更完整的
+  `tests/.eslintrc.cjs` 生效，`npm run lint` 恢复正常。
+
+### ✨ 新增
+
+- **多窗口数据安全（#5864，Bug1+Bug2）**：同一账号开两个窗口会静默损坏数据
+  （settings 乒乓覆盖、聊天消息丢失）。新增乐观锁 + 冲突检测，全部藏在
+  `multiWindow.enabled` 配置开关后（默认关，关闭时行为与旧版字节一致）：
+  - settings.json 增加 `_mw_rev` 版本字段、聊天增加 `chat_metadata.rev`，保存时做
+    compare-and-swap，版本过期返回 HTTP 409 `{error:'conflict'}` 而非静默覆盖。
+  - 前端每个保存点弹「重载 / 强制覆盖 / 取消」冲突确认框，成功后推进本地版本号。
+  - 覆盖 settings、单聊、群聊；世界书/角色卡/主题/快捷回复的实时租约（Bug3/4）
+    需服务端推送层，留待后续。
+
 ## [1.18.0-patch-2.1.1] - 2026-08-14
 
 ### 🔧 重构
