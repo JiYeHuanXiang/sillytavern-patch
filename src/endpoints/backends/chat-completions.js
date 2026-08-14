@@ -2299,6 +2299,11 @@ router.post('/generate', async function (request, response) {
                 plugins: getOpenRouterPlugins(request),
             };
 
+            if (request.body.logprobs > 0) {
+                bodyParams['top_logprobs'] = request.body.logprobs;
+                bodyParams['logprobs'] = true;
+            }
+
             // For DeepSeek models, use thinking parameter directly
             if (isDeepSeekModel) {
                 const _thinking = resolveDeepSeekThinking(request.body.model, includeReasoning, request.body.reasoning_effort);

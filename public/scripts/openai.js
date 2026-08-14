@@ -2701,6 +2701,7 @@ export async function createGenerationParameters(settings, model, type, messages
     const logprobsSupportedSources = [
         chat_completion_sources.OPENAI,
         chat_completion_sources.AZURE_OPENAI,
+        chat_completion_sources.OPENROUTER,
         chat_completion_sources.CUSTOM,
         chat_completion_sources.DEEPSEEK,
         chat_completion_sources.XAI,
@@ -3270,6 +3271,7 @@ function parseChatCompletionLogprobs(data) {
                 : parseOpenAITextLogprobs(data.choices[0]?.logprobs);
         case chat_completion_sources.OPENAI:
         case chat_completion_sources.AZURE_OPENAI:
+        case chat_completion_sources.OPENROUTER:
         case chat_completion_sources.DEEPSEEK:
         case chat_completion_sources.XAI:
         case chat_completion_sources.CUSTOM:
