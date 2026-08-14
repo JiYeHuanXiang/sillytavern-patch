@@ -99,7 +99,7 @@ export function checkSettingsRevision(pathToSettings, payload, enabled = false) 
  * Returns null when the file is missing/empty/has no `rev` field (i.e. a
  * pre-multi-window chat or a new chat) — callers treat null as "no revision
  * to check yet".
- * @param {string} firstLine The first line of the chat JSONL (already read by the caller)
+ * @param {string | null} firstLine The first line of the chat JSONL (already read by the caller; null/empty if absent)
  * @returns {number | null}
  */
 export function readChatRevisionFromFirstLine(firstLine) {
