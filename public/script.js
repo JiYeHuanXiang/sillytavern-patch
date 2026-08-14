@@ -188,6 +188,9 @@ import {
     shakeElement,
     createTimeout,
     mapWithConcurrency,
+    getWindowId,
+    handleConflictResponse,
+    isMultiWindowActive,
 } from './scripts/utils.js';
 import { debounce_timeout, GENERATION_TYPE_TRIGGERS, IGNORE_SYMBOL, inject_ids, MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE, OVERSWIPE_BEHAVIOR, SCROLL_BEHAVIOR, SWIPE_DIRECTION, SWIPE_SOURCE, SWIPE_STATE } from './scripts/constants.js';
 
@@ -669,6 +672,13 @@ export function getRequestHeaders({ omitContentType = false } = {}) {
         delete headers['Content-Type'];
     }
 
+    // Multi-window lost-update protection: tag every request with this tab's id
+    // so the server can attribute writes to a window. Only emitted when the
+    // server has signalled multi-window is on (presence of _mw_rev in settings).
+    if (isMultiWindowActive()) {
+        headers['X-Window-Id'] = getWindowId();
+    }
+
     return headers;
 }
 
@@ -681,6 +691,9 @@ export function getSlideToggleOptions() {
 
 $.ajaxPrefilter((options, originalOptions, xhr) => {
     xhr.setRequestHeader('X-CSRF-Token', token);
+    if (isMultiWindowActive()) {
+        xhr.setRequestHeader('X-Window-Id', getWindowId());
+    }
 });
 
 /**
@@ -7776,15 +7789,38 @@ export async function saveChat({ chatName, withMetadata, mesId, force = false, c
                 chat: [chatHeader, ...trimmedChat],
                 avatar_url: characters[this_chid].avatar,
                 force: force,
+                // Multi-window revision token (ignored when the flag is off).
+                rev: chat_metadata?.rev,
             }),
         });
         const result = await fetch('/api/chats/save', saveChatRequest);
 
         if (result.ok) {
+            // Advance the local revision token from the server's response so the
+            // next save compares against the just-written rev.
+            const okBody = await result.json().catch(() => ({}));
+            if (typeof okBody.rev === 'number') {
+                chat_metadata.rev = okBody.rev;
+            }
             return;
         }
 
-        const errorData = await result.json();
+        // Multi-window conflict (409): another window wrote this chat first.
+        // handleConflictResponse inspects/reads the body; if not a conflict it
+        // returns {conflict:false} without consuming it, so we can still read
+        // errorData below for the integrity branch.
+        if (!force && result.status === 409) {
+            const conflict = await handleConflictResponse(result);
+            if (conflict.conflict) {
+                if (conflict.force) {
+                    await saveChat({ chatName, withMetadata, mesId, force: true });
+                }
+                // Reload (handled inside the popup) or Cancel: abort this save.
+                return;
+            }
+        }
+
+        const errorData = await result.json().catch(() => ({}));
         const isIntegrityError = errorData?.error === 'integrity' && !force;
         if (!isIntegrityError) {
             throw new Error(result.statusText);
@@ -8433,6 +8469,12 @@ export async function saveSettings(loopCounter = 0) {
         selected_proxy: selected_proxy,
     };
 
+    // Carry the multi-window revision token so the server can do
+    // compare-and-swap. Omitted entirely when multi-window is off.
+    if (isMultiWindowActive() && typeof settings?._mw_rev === 'number') {
+        payload._mw_rev = settings._mw_rev;
+    }
+
     try {
         const saveSettingsRequest = await compressRequest({
             method: 'POST',
@@ -8442,10 +8484,46 @@ export async function saveSettings(loopCounter = 0) {
         });
         const result = await fetch('/api/settings/save', saveSettingsRequest);
 
-        if (!result.ok) {
+        // Multi-window conflict: another window saved newer settings first.
+        // handleConflictResponse prompts the user to reload or force-overwrite.
+        const conflict = await handleConflictResponse(result);
+        if (conflict.conflict) {
+            if (conflict.force) {
+                // Server rejected our token; to force-overwrite we re-send so the
+                // server adopts the on-disk rev and bumps it. The server's
+                // checkSettingsRevision treats a missing token as an accepted
+                // first-save, so omit _mw_rev to bypass the CAS gate.
+                const forcedPayload = { ...payload };
+                delete forcedPayload._mw_rev;
+                const forceRetry = await compressRequest({
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify(forcedPayload),
+                    cache: 'no-cache',
+                });
+                const forceResult = await fetch('/api/settings/save', forceRetry);
+                if (!forceResult.ok) {
+                    throw new Error(`Failed to save settings (force): ${forceResult.statusText}`);
+                }
+                const forceBody = await forceResult.json().catch(() => ({}));
+                payload._mw_rev = forceBody.rev ?? payload._mw_rev;
+                settings = payload;
+                await eventSource.emit(event_types.SETTINGS_UPDATED);
+                return;
+            } else {
+                // User chose Cancel: skip this save silently.
+                return;
+            }
+        } else if (!result.ok) {
             throw new Error(`Failed to save settings: ${result.statusText}`);
         }
 
+        // Advance our local revision token from the server's response so the
+        // next save compares against the just-written rev.
+        const body = await result.json().catch(() => ({}));
+        if (typeof body.rev === 'number') {
+            payload._mw_rev = body.rev;
+        }
         settings = payload;
         await eventSource.emit(event_types.SETTINGS_UPDATED);
     } catch (error) {

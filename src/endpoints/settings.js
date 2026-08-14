@@ -9,6 +9,7 @@ import bytes from 'bytes';
 import { SETTINGS_FILE } from '../constants.js';
 import { getConfigValue, generateTimestamp, removeOldBackups } from '../util.js';
 import { getAllUserHandles, getUserDirectories } from '../users.js';
+import { checkSettingsRevision, isMultiWindowEnabled } from '../multi-window.js';
 import { getFileNameValidationFunction } from '../middleware/validateFileName.js';
 
 const ENABLE_EXTENSIONS = !!getConfigValue('extensions.enabled', true, 'boolean');
@@ -206,9 +207,15 @@ export const router = express.Router();
 router.post('/save', function (request, response) {
     try {
         const pathToSettings = path.join(request.user.directories.root, SETTINGS_FILE);
-        writeFileAtomicSync(pathToSettings, JSON.stringify(request.body, null, 4), 'utf8');
+        const result = checkSettingsRevision(pathToSettings, request.body, isMultiWindowEnabled());
+        if (result.conflict) {
+            return response.status(409).send({ error: 'conflict', serverRev: result.serverRev });
+        }
+        writeFileAtomicSync(pathToSettings, JSON.stringify(result.body, null, 4), 'utf8');
         triggerAutoSave(request.user.profile.handle);
-        response.send({ result: 'ok' });
+        // Echo the persisted revision so the client can advance its token; omit
+        // it entirely when multi-window is off (result.nextRev === 0 sentinel).
+        response.send(result.nextRev ? { result: 'ok', rev: result.nextRev } : { result: 'ok' });
     } catch (err) {
         console.error(err);
         response.send(err);

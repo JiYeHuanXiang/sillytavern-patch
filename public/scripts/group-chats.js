@@ -19,6 +19,7 @@ import {
     waitUntilCondition,
     uuidv4,
     download,
+    handleConflictResponse,
 } from './utils.js';
 import { RA_CountCharTokens, humanizedDateTime, dragElement, favsToHotswap, getMessageTimeStamp } from './RossAscends-mods.js';
 import { power_user, loadMovingUIState, sortEntitiesList } from './power-user.js';
@@ -691,12 +692,29 @@ async function saveGroupChat(groupId, shouldSaveGroup, force = false) {
     const saveGroupChatRequest = await compressRequest({
         method: 'POST',
         headers: getRequestHeaders(),
-        body: JSON.stringify({ id: chatId, chat: [chatHeader, ...chat], force: force }),
+        body: JSON.stringify({ id: chatId, chat: [chatHeader, ...chat], force: force, rev: chat_metadata?.rev }),
     });
     const response = await fetch('/api/chats/group/save', saveGroupChatRequest);
 
-    if (!response.ok) {
-        const errorData = await response.json();
+    if (response.ok) {
+        // Advance the local revision token from the server's response.
+        const okBody = await response.json().catch(() => ({}));
+        if (typeof okBody.rev === 'number') {
+            chat_metadata.rev = okBody.rev;
+        }
+    } else {
+        // Multi-window conflict (409): another window wrote this group chat first.
+        if (!force && response.status === 409) {
+            const conflict = await handleConflictResponse(response);
+            if (conflict.conflict) {
+                if (conflict.force) {
+                    await saveGroupChat(groupId, shouldSaveGroup, true);
+                }
+                return;
+            }
+        }
+
+        const errorData = await response.json().catch(() => ({}));
         const isIntegrityError = errorData?.error === 'integrity' && !force;
         if (!isIntegrityError) {
             toastr.error(t`Check the server connection and reload the page to prevent data loss.`, t`Group Chat could not be saved`);
