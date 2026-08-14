@@ -9,6 +9,42 @@
 类型检查修复版本，无功能变更。
 
 ### 🐛 修复
+- 通用修复，涵盖安全、性能、稳定性与工程化：
+
+ - SSRF防护(项目2): 新增 src/url-safety.js。CORS代理(/proxy)严格
+  拦截私有/环回/云元数据/非http协议；LLM API路径(allowPrivate)
+  放行本地推理后端仍拦云元数据与非http。新增 ssrfProtection 配置
+  开关(env: SILLYTAVERN_SSRFPROTECTION)。覆盖 chat-completions/
+  text-completions/openai/google 各 URL 派生点。
+
+ - DeepSeek思考开关统一(项目5): 抽取 resolveDeepSeekThinking 合并
+  四处重复逻辑，修 universal 分支 ===false 与另三处 ! 的不一致。
+  非 DeepSeek 模型当 reasoning_effort==='disabled' 时映射为最小
+  深度 'low'(无法真正关闭思考)。
+
+ - 子目录缓存失效(项目4): util.js 新增 invalidateDirListCache，
+  characters.js 写路径(writeCharacterData/delete/duplicate/rename)
+  调用，修复子目录增删卡后 /api/characters/all 返回陈旧列表。
+  附回归测试。
+
+ - 同步FS转异步(项目7a): characters.js 19处 + stable-diffusion.js
+  6处 readFileSync/unlinkSync/cpSync/writeFileAtomicSync 等转为
+  await fsPromises/writeFileAtomic，解除事件循环阻塞。保留
+  existsSync 守卫与 getUniqueName/getCacheKey 谓词不动。
+
+ - 上游fetch超时(项目7b): util.js 新增 combineAbortSignals，合并
+  客户端断开与服务端超时(AbortSignal.any/.timeout)。两 backend
+  14处 fetch 加 requestTimeout(默认0=不启用)。删除 node-fetch v3
+  已忽略的死 timeout:0。
+
+ - CI复活(项目6): 删 .gitignore 对 .github/workflows/ 的忽略
+  (CI死掉的根因)；新增 ci.yml(lint/build/unit-test硬门 +
+  typecheck信息性)；根 package.json 加 test/build/typecheck 脚本；
+  新增 scripts/build.mjs 独立 webpack 构建；@types/node ^18→^22
+  对齐 engines>=20。jest 排除误拾取的 sample e2e 占位。
+
+ - 顺带清理因 CI从未运行而积累的若干 lint 遗留错误(未用变量/引号/
+  逗号/重复键)，含 group-chats.js connectionSnapshot 作用域 bug 修复。
 
 - **CI 类型检查**：修复 `Type check (informational)` 检查项因 6000+ 假错误而始终失败的问题，检查现可通过。
   - 新增 `tsconfig.ci.json`，仅对 `src/` 服务端源码执行类型检查，避免 minified 第三方库与 `public/` 打包产物产生噪音。
