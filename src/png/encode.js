@@ -55,7 +55,7 @@ export default function encode(chunks) {
             output[idx++] = data[j++];
         }
 
-        const crc = crc32(data, crc32(new Uint8Array(nameChars)));
+        const crc = crc32(/** @type {Buffer} */ (data), crc32(/** @type {Buffer} */ (new Uint8Array(nameChars))));
 
         int32[0] = crc;
         output[idx++] = uint8[3];

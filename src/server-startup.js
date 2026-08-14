@@ -259,7 +259,7 @@ export class ServerStartup {
      * Creates an HTTPS server.
      * @param {URL} url The URL to listen on
      * @param {number} ipVersion the ip version to use
-     * @returns {Promise<void>} A promise that resolves when the server is listening
+     * @returns {Promise<import('https').Server>} A promise that resolves with the server when it's listening
      */
     #createHttpsServer(url, ipVersion) {
         this.#verifySslOptions();

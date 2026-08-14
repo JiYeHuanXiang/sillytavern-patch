@@ -999,7 +999,7 @@ router.post('/recent', async function (request, response) {
         /** @typedef {{pngFile?: string, groupId?: string, filePath: string, mtime: number}} ChatFile */
         /** @type {ChatFile[]} */
         const allChatFiles = [];
-        /** @type {import('../../public/scripts/welcome-screen.js').PinnedChat[]} */
+        /** @type {{file_name?: string, avatar?: string, group?: string}[]} */
         const pinnedChats = Array.isArray(request.body.pinned) ? request.body.pinned : [];
 
         const getCharacterChatFiles = async () => {

@@ -200,14 +200,15 @@ export function formatBytes(numBytes) {
 
 /**
  * Extracts a file with given extension from an ArrayBuffer containing a ZIP archive.
- * @param {ArrayBufferLike} archiveBuffer Buffer containing a ZIP archive
+ * @param {ArrayBufferLike|Buffer} archiveBuffer Buffer containing a ZIP archive
  * @param {string} fileExtension File extension to look for
  * @returns {Promise<Buffer|null>} Buffer containing the extracted file. Null if the file was not found.
  */
 export async function extractFileFromZipBuffer(archiveBuffer, fileExtension) {
     return await new Promise((resolve) => {
         try {
-            yauzl.fromBuffer(Buffer.from(archiveBuffer), { lazyEntries: true }, (err, zipfile) => {
+            const buffer = Buffer.isBuffer(archiveBuffer) ? archiveBuffer : Buffer.from(archiveBuffer);
+            yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
                 if (err) {
                     console.warn(`Error opening ZIP file: ${err.message}`);
                     return resolve(null);
@@ -290,7 +291,7 @@ export function normalizeZipEntryPath(entryName) {
 
 /**
  * Extracts multiple files from an ArrayBuffer containing a ZIP archive.
- * @param {ArrayBufferLike} archiveBuffer Buffer containing a ZIP archive
+ * @param {ArrayBufferLike|Buffer} archiveBuffer Buffer containing a ZIP archive
  * @param {string[]} fileNames Array of file paths to extract
  * @returns {Promise<Map<string, Buffer>>} Map of normalized paths to their extracted buffers
  */
@@ -314,7 +315,8 @@ export async function extractFilesFromZipBuffer(archiveBuffer, fileNames) {
         const results = new Map();
 
         try {
-            yauzl.fromBuffer(Buffer.from(archiveBuffer), { lazyEntries: true }, (err, zipfile) => {
+            const buffer = Buffer.isBuffer(archiveBuffer) ? archiveBuffer : Buffer.from(archiveBuffer);
+            yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
                 if (err) {
                     console.warn(`Error opening ZIP file: ${err.message}`);
                     return resolve(results);

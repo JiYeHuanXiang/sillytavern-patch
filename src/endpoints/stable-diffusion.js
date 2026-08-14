@@ -18,7 +18,7 @@ import { AIMLAPI_HEADERS } from '../constants.js';
 /**
  * Gets the comfy workflows.
  * @param {import('../users.js').UserDirectoryList} directories
- * @returns {string[]} List of comfy workflows
+ * @returns {Promise<string[]>} List of comfy workflows
  */
 async function getComfyWorkflows(directories) {
     const files = await fsPromises.readdir(directories.comfyWorkflows);

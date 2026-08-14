@@ -2254,6 +2254,7 @@ router.post('/generate', async function (request, response) {
         let apiUrl;
         let apiKey;
         let headers;
+        /** @type {any} */
         let bodyParams;
         const isTextCompletion = Boolean(request.body.model && TEXT_COMPLETION_MODELS.includes(request.body.model)) || typeof request.body.messages === 'string';
 

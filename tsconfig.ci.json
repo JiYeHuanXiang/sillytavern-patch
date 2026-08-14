@@ -1,0 +1,29 @@
+{
+    "extends": "./jsconfig.json",
+    "compilerOptions": {
+        // Don't type-check JS files from node_modules (ships its own noise).
+        "maxNodeModuleJsDepth": 0,
+        // The @agnai/sentencepiece-js package ships no types and its minified
+        // dist file produces thousands of spurious errors when type-checked.
+        // Redirect its imports to a minimal ambient declaration instead.
+        "skipLibCheck": true,
+        "paths": {
+            "@agnai/sentencepiece-js": [
+                "./stubs/agnai-sentencepiece-js.d.ts"
+            ]
+        }
+    },
+    // Only type-check the server source. public/** and tests/** are excluded
+    // because they import bundled/minified third-party libs (pdf.min.mjs,
+    // epub.min.js, ...) that flood the check with noise.
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "src/tokenizers/**",
+        // The electron package is only installed for electron builds.
+        "src/electron/**"
+    ]
+}
