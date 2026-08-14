@@ -4,6 +4,18 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.1.1] - 2026-08-14
+
+类型检查修复版本，无功能变更。
+
+### 🐛 修复
+
+- **CI 类型检查**：修复 `Type check (informational)` 检查项因 6000+ 假错误而始终失败的问题，检查现可通过。
+  - 新增 `tsconfig.ci.json`，仅对 `src/` 服务端源码执行类型检查，避免 minified 第三方库与 `public/` 打包产物产生噪音。
+  - 新增 `stubs/agnai-sentencepiece-js.d.ts`，为无类型声明的 `@agnai/sentencepiece-js` 包提供最小类型定义。
+  - 修正 `src/` 下若干 JSDoc 类型标注（HTTPS server 返回类型、async 函数 Promise 返回类型、Buffer 断言等），均为纯类型标注，零运行时变化。
+  - 移除 `src/endpoints/chats.js` 中对 `public/scripts/welcome-screen.js` 的 JSDoc 类型引用（该引用会把整个 `public/` 依赖图拉入检查范围）。
+
 ## [1.18.0-patch-2.1] - 2026-08-07
 
 2.0 之后第一个小更新。新增局域网聊天（实验性）与 HTML 沙盒预览，并同步上游多项修复与性能优化。
