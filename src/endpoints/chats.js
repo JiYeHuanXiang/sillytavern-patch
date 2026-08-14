@@ -45,8 +45,16 @@ function backupChat(directory, name, data, backupPrefix = CHAT_BACKUPS_PREFIX) {
         if (!fs.existsSync(directory)) {
             console.error(`The chat couldn't be backed up because no directory exists at ${directory}!`);
         }
-        // replace non-alphanumeric characters with underscores
-        name = sanitize(name).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        // Sanitize for the filesystem only; keep Unicode (so non-Latin names like
+        // 艾莉亚 / アリア stay distinct). The previous [^a-z0-9] strip collapsed all
+        // non-ASCII names into the same "_" slug, making different characters share
+        // a single prune quota and overwrite each other's backups (#5780).
+        name = sanitize(name).replace(/^\.+/, '').trim();
+        // Never let the slug become empty (sanitize can strip everything), or all
+        // such characters would again collide on a single backup namespace.
+        if (!name) {
+            name = 'Unnamed';
+        }
 
         const backupFile = path.join(directory, `${backupPrefix}${name}_${generateTimestamp()}.jsonl`);
 
