@@ -502,13 +502,14 @@ export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false
 
     // Multi-window lost-update check (no-op when the flag is off or the save is forced).
     const onDiskFirstLine = await readFirstLine(filePath);
-    const revCheck = checkChatRevision(onDiskFirstLine, clientRev, skipIntegrityCheck === true || skipIntegrityCheck === 'force', isMultiWindowEnabled());
+    const isForced = !!skipIntegrityCheck;
+    const revCheck = checkChatRevision(onDiskFirstLine, clientRev, isForced, isMultiWindowEnabled());
     if (revCheck.conflict) {
         throw new ChatConflictError(`Chat revision conflict for "${filePath}". Client rev was "${clientRev}", server rev is "${revCheck.serverRev}".`);
     }
 
     // Stamp the next revision into the chat header before serialising.
-    const nextRev = nextChatRevision(onDiskFirstLine, skipIntegrityCheck === true || skipIntegrityCheck === 'force', isMultiWindowEnabled());
+    const nextRev = nextChatRevision(onDiskFirstLine, isForced, isMultiWindowEnabled());
     let chatDataToWrite = chatData;
     if (nextRev !== null && Array.isArray(chatDataToWrite) && chatDataToWrite[0]) {
         chatDataToWrite = chatDataToWrite.map((m, i) => i === 0
