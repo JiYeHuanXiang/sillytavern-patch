@@ -23,6 +23,7 @@ import {
     isPathUnderParent,
     findPngFilesRecursive,
 } from '../util.js';
+import { checkChatRevision, nextChatRevision, CHAT_REV_FIELD, isMultiWindowEnabled } from '../multi-window.js';
 
 const isBackupEnabled = !!getConfigValue('backups.chat.enabled', true, 'boolean');
 const maxTotalChatBackups = Number(getConfigValue('backups.chat.maxTotalBackups', -1, 'number'));
@@ -469,26 +470,56 @@ class IntegrityMismatchError extends Error {
     }
 }
 
+// Raised when a multi-window revision check detects a lost-update race
+// (another window wrote the chat after this client loaded it).
+class ChatConflictError extends Error {
+    constructor(...params) {
+        super(...params);
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, ChatConflictError);
+        }
+        this.date = new Date();
+    }
+}
+
 /**
  * Tries to save the chat data to a file, performing an integrity check if required.
  * @param {Array} chatData The chat array to save.
  * @param {string} filePath Target file path for the data.
- * @param {boolean} skipIntegrityCheck If undefined, the chat's integrity will not be checked.
+ * @param {boolean} skipIntegrityCheck If undefined, the chat's integrity will not be checked. A forced save also skips multi-window revision checks.
  * @param {string} handle The users handle, passed to getBackupFunction.
  * @param {string} cardName Passed to backupChat.
  * @param {string} backupDirectory Passed to backupChat.
+ * @param {number} [clientRev] Revision the client loaded with, for multi-window lost-update detection.
  */
-export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false, handle, cardName, backupDirectory) {
-    const jsonlData = chatData?.map(m => JSON.stringify(m)).join('\n');
-
+export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false, handle, cardName, backupDirectory, clientRev) {
     const doIntegrityCheck = (checkIntegrity && !skipIntegrityCheck);
     const chatIntegritySlug = doIntegrityCheck ? chatData?.[0]?.chat_metadata?.integrity : undefined;
 
     if (chatIntegritySlug && !await checkChatIntegrity(filePath, chatIntegritySlug)) {
         throw new IntegrityMismatchError(`Chat integrity check failed for "${filePath}". The expected integrity slug was "${chatIntegritySlug}".`);
     }
+
+    // Multi-window lost-update check (no-op when the flag is off or the save is forced).
+    const onDiskFirstLine = await readFirstLine(filePath);
+    const revCheck = checkChatRevision(onDiskFirstLine, clientRev, skipIntegrityCheck === true || skipIntegrityCheck === 'force', isMultiWindowEnabled());
+    if (revCheck.conflict) {
+        throw new ChatConflictError(`Chat revision conflict for "${filePath}". Client rev was "${clientRev}", server rev is "${revCheck.serverRev}".`);
+    }
+
+    // Stamp the next revision into the chat header before serialising.
+    const nextRev = nextChatRevision(onDiskFirstLine, skipIntegrityCheck === true || skipIntegrityCheck === 'force', isMultiWindowEnabled());
+    let chatDataToWrite = chatData;
+    if (nextRev !== null && Array.isArray(chatDataToWrite) && chatDataToWrite[0]) {
+        chatDataToWrite = chatDataToWrite.map((m, i) => i === 0
+            ? { ...m, chat_metadata: { ...(m.chat_metadata || {}), [CHAT_REV_FIELD]: nextRev } }
+            : m);
+    }
+
+    const jsonlData = chatDataToWrite?.map(m => JSON.stringify(m)).join('\n');
     tryWriteFileSync(filePath, jsonlData);
     getBackupFunction(handle, backupDirectory, cardName)(backupDirectory, cardName, jsonlData);
+    return nextRev;
 }
 
 router.post('/save', validateAvatarUrlMiddleware, async function (request, response) {
@@ -503,8 +534,8 @@ router.post('/save', validateAvatarUrlMiddleware, async function (request, respo
         }
 
         if (Array.isArray(chatData)) {
-            await trySaveChat(chatData, chatFilePath, request.body.force, handle, cardName, request.user.directories.backups);
-            return response.send({ ok: true });
+            const rev = await trySaveChat(chatData, chatFilePath, request.body.force, handle, cardName, request.user.directories.backups, request.body.rev);
+            return response.send(rev === null ? { ok: true } : { ok: true, rev });
         } else {
             return response.status(400).send({ error: 'The request\'s body.chat is not an array.' });
         }
@@ -512,6 +543,10 @@ router.post('/save', validateAvatarUrlMiddleware, async function (request, respo
         if (error instanceof IntegrityMismatchError) {
             console.error(error.message);
             return response.status(400).send({ error: 'integrity' });
+        }
+        if (error instanceof ChatConflictError) {
+            console.error(error.message);
+            return response.status(409).send({ error: 'conflict' });
         }
         console.error(error);
         return response.status(500).send({ error: 'An error has occurred, see the console logs for more information.' });
@@ -882,8 +917,8 @@ router.post('/group/save', async function (request, response) {
         const chatData = request.body.chat;
 
         if (Array.isArray(chatData)) {
-            await trySaveChat(chatData, chatFilePath, request.body.force, handle, String(id), request.user.directories.backups);
-            return response.send({ ok: true });
+            const rev = await trySaveChat(chatData, chatFilePath, request.body.force, handle, String(id), request.user.directories.backups, request.body.rev);
+            return response.send(rev === null ? { ok: true } : { ok: true, rev });
         } else {
             return response.status(400).send({ error: 'The request\'s body.chat is not an array.' });
         }
@@ -891,6 +926,10 @@ router.post('/group/save', async function (request, response) {
         if (error instanceof IntegrityMismatchError) {
             console.error(error.message);
             return response.status(400).send({ error: 'integrity' });
+        }
+        if (error instanceof ChatConflictError) {
+            console.error(error.message);
+            return response.status(409).send({ error: 'conflict' });
         }
         console.error(error);
         return response.status(500).send({ error: 'An error has occurred, see the console logs for more information.' });

@@ -7,11 +7,11 @@ import {
 } from '../lib.js';
 
 import { getContext } from './extensions.js';
-import { characters, getRequestHeaders, processDroppedFiles, this_chid, user_avatar } from '../script.js';
+import { characters, getRequestHeaders, processDroppedFiles, settings, this_chid, user_avatar } from '../script.js';
 import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines, power_user } from './power-user.js';
 import { debounce_timeout } from './constants.js';
-import { Popup, POPUP_RESULT, POPUP_TYPE } from './popup.js';
+import { callGenericPopup, Popup, POPUP_RESULT, POPUP_TYPE } from './popup.js';
 import { SlashCommandClosure } from './slash-commands/SlashCommandClosure.js';
 import { getTagsList } from './tags.js';
 import { groups, selected_group } from './group-chats.js';
@@ -2000,6 +2000,100 @@ export function uuidv4() {
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
+}
+
+// --- Multi-window lost-update protection (issue #5864) ----------------------
+// A per-tab id stored in sessionStorage so every request from this tab carries
+// the same X-Window-Id. The server only acts on it when multiWindow.enabled is
+// on; when the flag is off, this still sets a value but the server ignores it.
+const SESSION_WINDOW_ID_KEY = 'st_window_id';
+let _cachedWindowId = null;
+
+/**
+ * Returns a stable per-tab window id (generated once, then cached in memory
+ * and sessionStorage). Survives SPA navigation within the tab, not a full
+ * reload (by design: a fresh load is a new "window" for conflict purposes).
+ * @returns {string} A uuid string.
+ */
+export function getWindowId() {
+    if (_cachedWindowId) {
+        return _cachedWindowId;
+    }
+    try {
+        const stored = sessionStorage.getItem(SESSION_WINDOW_ID_KEY);
+        if (stored) {
+            _cachedWindowId = stored;
+            return stored;
+        }
+    } catch {
+        // sessionStorage may be unavailable (private mode); fall through to in-memory only.
+    }
+    _cachedWindowId = uuidv4();
+    try {
+        sessionStorage.setItem(SESSION_WINDOW_ID_KEY, _cachedWindowId);
+    } catch {
+        // Ignore; in-memory id still works for this session.
+    }
+    return _cachedWindowId;
+}
+
+/**
+ * Whether multi-window protection is effectively on for this client. We detect
+ * it from the presence of a revision token (`_mw_rev`) in the loaded settings
+ * blob: the server only stamps that field when the flag is on, so no extra
+ * endpoint handshake is needed.
+ * @returns {boolean}
+ */
+export function isMultiWindowActive() {
+    return settings && typeof settings._mw_rev === 'number';
+}
+
+/**
+ * Inspects a save response for a multi-window conflict (HTTP 409 + body
+ * `{ error: 'conflict' }`). When a conflict is detected, prompts the user:
+ *   - "Reload page" → reloads to pick up the latest server data.
+ *   - "Force overwrite" → returns `{ conflict: true, force: true }` so the
+ *     caller can re-issue the save with `force: true` (becoming the new latest).
+ *   - "Cancel" → returns `{ conflict: true, force: false }` (caller aborts).
+ *
+ * For non-conflict responses, returns `{ conflict: false }` and the caller
+ * proceeds with its own handling. NOTE: this consumes the response body's
+ * json, so the caller must not also read it.
+ *
+ * @param {Response} response The fetch Response from a save endpoint.
+ * @returns {Promise<{ conflict: boolean, force?: boolean }>}
+ */
+export async function handleConflictResponse(response) {
+    if (!response || response.status !== 409) {
+        return { conflict: false };
+    }
+    let body = null;
+    try {
+        body = await response.json();
+    } catch {
+        body = null;
+    }
+    if (body?.error !== 'conflict') {
+        return { conflict: false };
+    }
+
+    const result = await callGenericPopup(
+        `<p>${t`Your changes were not saved because another tab/window saved newer changes first.`}</p>
+         <p>${t`Reload this page to load the latest version, or discard the other window's changes by forcing this save (you may lose data).`}</p>`,
+        POPUP_TYPE.TEXT,
+        '',
+        {
+            okButton: false,
+            cancelButton: false,
+            customButtons: [
+                { text: t`Reload page`, result: POPUP_RESULT.CUSTOM1, action: () => window.location.reload() },
+                { text: t`Force overwrite`, result: POPUP_RESULT.CUSTOM2 },
+                { text: t`Cancel`, result: POPUP_RESULT.CUSTOM3 },
+            ],
+        },
+    );
+
+    return { conflict: true, force: result === POPUP_RESULT.CUSTOM2 };
 }
 
 /**

@@ -120,6 +120,14 @@ enableDiscreetLogin: false
 # the username and passwords for basic auth are the same as those
 # for the individual accounts
 perUserBasicAuth: false
+# -- MULTI-WINDOW CONFIGURATION --
+# Detect lost updates when the same account is open in two windows/tabs.
+# When enabled, settings and chat saves carry a revision token and the server
+# rejects a save whose token is stale (another window wrote first) with HTTP
+# 409 instead of silently clobbering it. Disabled = byte-identical behaviour to
+# single-window usage (recommended unless you actually use multiple tabs).
+multiWindow:
+  enabled: false
 
 # -- SSO LOGIN CONFIGURATION --
 sso:
