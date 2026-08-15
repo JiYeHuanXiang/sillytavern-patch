@@ -12,6 +12,7 @@ import { initConfig } from './config-init.js';
  * @property {string} configPath Path to the config file
  * @property {string} dataRoot Data root directory
  * @property {number} port Port number
+ * @property {boolean} enableAutoPortFallback If automatically try the next free port when the configured port is in use
  * @property {boolean} listen If SillyTavern is listening on all network interfaces
  * @property {string} listenAddressIPv6 IPv6 address to listen to
  * @property {string} listenAddressIPv4 IPv4 address to listen to
@@ -58,6 +59,7 @@ export class CommandLineParser {
             configPath: configPath,
             dataRoot: dataPath,
             port: 8000,
+            enableAutoPortFallback: true,
             listen: false,
             listenAddressIPv6: '[::]',
             listenAddressIPv4: '0.0.0.0',
@@ -133,6 +135,11 @@ export class CommandLineParser {
                 type: 'number',
                 default: null,
                 describe: 'Sets the server listening port',
+            })
+            .option('enableAutoPortFallback', {
+                type: 'boolean',
+                default: null,
+                describe: 'Automatically try the next free port when the configured port is already in use',
             })
             .option('dnsPreferIPv6', {
                 type: 'boolean',
@@ -301,6 +308,7 @@ export class CommandLineParser {
             configPath: configPath,
             dataRoot: dataRoot,
             port: cliArguments.port ?? getConfigValue('port', defaultConfig.port, 'number'),
+            enableAutoPortFallback: cliArguments.enableAutoPortFallback ?? getConfigValue('enableAutoPortFallback', defaultConfig.enableAutoPortFallback, 'boolean'),
             listen: cliArguments.listen ?? getConfigValue('listen', defaultConfig.listen, 'boolean'),
             listenAddressIPv6: cliArguments.listenAddressIPv6 ?? getConfigValue('listenAddress.ipv6', defaultConfig.listenAddressIPv6),
             listenAddressIPv4: cliArguments.listenAddressIPv4 ?? getConfigValue('listenAddress.ipv4', defaultConfig.listenAddressIPv4),

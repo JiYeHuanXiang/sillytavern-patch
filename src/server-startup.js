@@ -46,6 +46,9 @@ import { router as dataMaidRouter } from './endpoints/data-maid.js';
 import { router as backupsRouter } from './endpoints/backups.js';
 import { router as imageMetadataRouter } from './endpoints/image-metadata.js';
 
+// Maximum number of ports to try when auto port fallback is enabled.
+const AUTO_PORT_FALLBACK_MAX_ATTEMPTS = 100;
+
 /**
  * @typedef {object} ServerStartupResult
  * @property {boolean} v6Failed If the server failed to start on IPv6
@@ -309,52 +312,92 @@ export class ServerStartup {
     }
 
     /**
-     * Starts the server using http or https depending on config
+     * Starts the server using http or https depending on config. When auto port
+     * fallback is enabled and the configured port is already in use, retries on
+     * successive ports so dual-stack (IPv4 + IPv6) stays on the same port. A
+     * non-port error on one protocol is terminal for that protocol only, partial
+     * success (the other protocol bound) is preserved as in the original behavior.
      * @param {boolean} useIPv6 If use IPv6
      * @param {boolean} useIPv4 If use IPv4
      * @returns {Promise<[boolean, boolean, unknown, unknown, import('http').Server | import('https').Server | null, import('http').Server | import('https').Server | null]>}
      * A promise that resolves with: v6Failed, v4Failed, v6Error, v4Error, v6Server, v4Server
      */
     async #startHTTPorHTTPS(useIPv6, useIPv4) {
-        let v6Failed = false;
-        let v4Failed = false;
-        let v6Error;
-        let v4Error;
+        const createFunc = this.cliArgs.ssl ? this.#createHttpsServer.bind(this) : this.#createHttpServer.bind(this);
+        const requestedPort = Number(this.cliArgs.port || (this.cliArgs.ssl ? 443 : 80));
+        const maxAttempts = this.cliArgs.enableAutoPortFallback ? AUTO_PORT_FALLBACK_MAX_ATTEMPTS : 1;
+
+        /** @type {{ver: 6 | 4, getUrl: () => URL}[]} */
+        const protos = [];
+        if (useIPv6) protos.push({ ver: 6, getUrl: () => this.cliArgs.getIPv6ListenUrl() });
+        if (useIPv4) protos.push({ ver: 4, getUrl: () => this.cliArgs.getIPv4ListenUrl() });
+
         let v6Server = null;
         let v4Server = null;
+        let v6Error;
+        let v4Error;
 
-        const createFunc = this.cliArgs.ssl ? this.#createHttpsServer.bind(this) : this.#createHttpServer.bind(this);
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const port = requestedPort + attempt;
+            /** @type {{ver: 6 | 4}[]} */
+            const bound = [];
+            let hadPortConflict = false;
+            let hadHardError = false;
 
-        if (useIPv6) {
-            try {
-                v6Server = await createFunc(this.cliArgs.getIPv6ListenUrl(), 6);
-            } catch (error) {
-                console.error('Warning: failed to start server on IPv6');
-                if (this.#isAddressInUseError(error)) {
-                    console.error(this.#getAddressInUseMessage(this.cliArgs.getIPv6ListenUrl(), 6));
-                } else {
-                    console.error(error);
+            for (const p of protos) {
+                const url = p.getUrl();
+                url.port = String(port);
+                try {
+                    const server = await createFunc(url, p.ver);
+                    if (p.ver === 6) {
+                        v6Server = server; v6Error = undefined;
+                    } else {
+                        v4Server = server; v4Error = undefined;
+                    }
+                    bound.push(p);
+                } catch (error) {
+                    if (p.ver === 6) v6Error = error; else v4Error = error;
+                    if (this.#isAddressInUseError(error)) {
+                        hadPortConflict = true;
+                    } else {
+                        hadHardError = true;
+                    }
                 }
-
-                v6Failed = true;
-                v6Error = error;
             }
+
+            // Advance only on a pure port-occupied situation (no hard failures),
+            // and only if we still have attempts left. Close anything that bound on
+            // this port so both protocols move to the next port together.
+            if (hadPortConflict && !hadHardError && attempt < maxAttempts - 1) {
+                for (const p of bound) {
+                    const s = p.ver === 6 ? v6Server : v4Server;
+                    s?.close();
+                    if (p.ver === 6) {
+                        v6Server = null; v6Error = undefined;
+                    } else {
+                        v4Server = null; v4Error = undefined;
+                    }
+                }
+                continue;
+            }
+
+            // Terminus: keep what bound (if anything) and record the final port.
+            if (bound.length > 0 && port !== requestedPort) {
+                this.cliArgs.port = port;
+                console.warn(color.yellow(`Port ${requestedPort} is already in use. Switched to port ${port}.`));
+            }
+            break;
         }
 
-        if (useIPv4) {
-            try {
-                v4Server = await createFunc(this.cliArgs.getIPv4ListenUrl(), 4);
-            } catch (error) {
-                console.error('Warning: failed to start server on IPv4');
-                if (this.#isAddressInUseError(error)) {
-                    console.error(this.#getAddressInUseMessage(this.cliArgs.getIPv4ListenUrl(), 4));
-                } else {
-                    console.error(error);
-                }
-
-                v4Failed = true;
-                v4Error = error;
-            }
+        const v6Failed = useIPv6 && v6Server === null;
+        const v4Failed = useIPv4 && v4Server === null;
+        if (v6Failed) {
+            console.error('Warning: failed to start server on IPv6');
+            console.error(this.#isAddressInUseError(v6Error) ? this.#getAddressInUseMessage(this.cliArgs.getIPv6ListenUrl(), 6) : v6Error);
+        }
+        if (v4Failed) {
+            console.error('Warning: failed to start server on IPv4');
+            console.error(this.#isAddressInUseError(v4Error) ? this.#getAddressInUseMessage(this.cliArgs.getIPv4ListenUrl(), 4) : v4Error);
         }
 
         return [v6Failed, v4Failed, v6Error, v4Error, v6Server, v4Server];

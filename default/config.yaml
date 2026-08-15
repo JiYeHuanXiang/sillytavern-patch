@@ -38,6 +38,8 @@ browserLaunch:
   avoidLocalhost: false
 # Server port
 port: 8000
+# Automatically try the next free port when the configured one is already in use.
+enableAutoPortFallback: true
 # Interval in seconds to write a heartbeat file. Set to 0 to disable.
 # This is used primarily for Docker healthchecks.
 heartbeatInterval: 0
