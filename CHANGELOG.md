@@ -4,6 +4,30 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.1.3] - 2026-08-20
+
+### 🐛 修复
+
+- **character-index 写盘原子性**：异步 `flush()` 原先用非原子 `fsPromises.writeFile`，
+  而 `flushSync` 用原子写——写盘中途崩溃会损坏整个 index 文件，违反该类
+  "崩溃最多丢一次编辑"的契约。改为统一用 `write-file-atomic`；定时器外层
+  `.catch(()=>{})` 改为记录意外错误。
+- **浮动 Promise 兜底**：`utils.js` 的 select2 transport 把 `promise.then(success)`
+  与独立 `.catch(failure)` 合成链式调用（原 promise 恒 resolve，外层 catch 是死代码）；
+  `world-info.js` 内嵌世界书导入弹窗的 `importEmbeddedWorldInfo(true)` 未 await，
+  改为 async + try/catch；`server-main.js` 启动链末尾加 `.catch(log + exit)`，
+  与既有 port-in-use fatal 模式一致。
+- **chat 加载错误日志级别**：`script.js` 的 chat 加载 catch 原用 `console.log`
+  记错误（被默认控制台过滤吞掉），改为 `console.error('Failed to load chat', ...)`。
+
+### 🔒 安全
+
+- **npm audit 非破坏性 bump（44→16）**：在现有 ^range 内升级 lockfile 到补丁版，
+  package.json 一字未改（与上游 staging 逐字一致）。覆盖 express/body-parser/
+  dompurify/multer/form-data/simple-git/axios/js-yaml/brace-expansion/fast-uri 等。
+  webpack build + 351 单元测试全绿。余 16 个为 breaking 或无 fix（protobufjs/
+  sillytavern-transformers/image-size/showdown/chevrotain/vectra 等），延后。
+
 ## [1.18.0-patch-2.1] - 2026-08-07
 
 2.0 之后第一个小更新。新增局域网聊天（实验性）与 HTML 沙盒预览，并同步上游多项修复与性能优化。
