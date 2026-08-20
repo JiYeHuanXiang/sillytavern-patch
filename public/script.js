@@ -8047,7 +8047,7 @@ export async function getChat() {
         });
     } catch (error) {
         await getChatResult();
-        console.log(error);
+        console.error('Failed to load chat', error);
     }
 }
 

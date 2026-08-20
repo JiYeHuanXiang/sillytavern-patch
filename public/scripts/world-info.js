@@ -5626,9 +5626,13 @@ export function checkEmbeddedWorld(chid) {
                 const html = `<h3>This character has an embedded World/Lorebook.</h3>
                 <h3>Would you like to import it now?</h3>
                 <div class="m-b-1">If you want to import it later, select "Import Card Lore" in the "More..." dropdown menu on the character panel.</div>`;
-                const checkResult = (result) => {
+                const checkResult = async (result) => {
                     if (result) {
-                        importEmbeddedWorldInfo(true);
+                        try {
+                            await importEmbeddedWorldInfo(true);
+                        } catch (error) {
+                            console.error('Failed to import embedded world info', error);
+                        }
                     }
                 };
                 callGenericPopup(html, POPUP_TYPE.CONFIRM, '', { okButton: 'Yes' }).then(checkResult);

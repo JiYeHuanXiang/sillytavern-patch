@@ -509,4 +509,8 @@ initUserStorage(globalThis.DATA_ROOT)
     .then(preSetupTasks)
     .then(apply404Middleware)
     .then(() => new ServerStartup(app, cliArgs).start())
-    .then(postSetupTasks);
+    .then(postSetupTasks)
+    .catch(error => {
+        console.error('Server startup failed:', error);
+        process.exit(1);
+    });

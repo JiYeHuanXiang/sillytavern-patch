@@ -2483,8 +2483,7 @@ export function dynamicSelect2DataViaAjax(dataProvider) {
         var promise = new Promise(function (resolve, reject) {
             resolve({ results: items });
         });
-        promise.then(success);
-        promise.catch(failure);
+        promise.then(success).catch(failure);
     }
     const ajax = {
         transport: dynamicSelect2DataTransport,
