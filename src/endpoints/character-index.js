@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
-import { sync as writeFileAtomicSync } from 'write-file-atomic';
+import writeFileAtomic, { sync as writeFileAtomicSync } from 'write-file-atomic';
 
 /**
  * @typedef {Object} ShallowCharacter
@@ -183,10 +183,10 @@ class CharacterIndexStore {
         if (this.#flushTimer) {
             clearTimeout(this.#flushTimer);
         }
-        this.#flushTimer = setTimeout(() => this.flush().catch(() => { }), CharacterIndexStore.FLUSH_DELAY);
+        this.#flushTimer = setTimeout(() => this.flush().catch(err => console.error('CharacterIndex: unexpected flush failure', err)), CharacterIndexStore.FLUSH_DELAY);
         if (!this.#periodicScheduled) {
             this.#periodicScheduled = true;
-            setInterval(() => this.flush().catch(() => { }), CharacterIndexStore.FLUSH_INTERVAL).unref?.();
+            setInterval(() => this.flush().catch(err => console.error('CharacterIndex: unexpected flush failure', err)), CharacterIndexStore.FLUSH_INTERVAL).unref?.();
         }
     }
 
@@ -211,7 +211,7 @@ class CharacterIndexStore {
             try {
                 await fsPromises.mkdir(dir, { recursive: true });
                 const payload = JSON.stringify({ version: 1, entries: [...store.values()] });
-                await fsPromises.writeFile(indexPath, payload, 'utf8');
+                await writeFileAtomic(indexPath, payload, 'utf8');
             } catch (error) {
                 console.error(`CharacterIndex: failed to flush index for ${handle}`, error);
                 // Re-mark dirty so the next flush retries.
