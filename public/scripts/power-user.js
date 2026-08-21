@@ -129,6 +129,11 @@ export const power_user = {
         allow_chat_completions: false,
         target_length: 400,
     },
+    time_perception: {
+        enabled: false,
+        default_timeout: 2,
+        placeholder: '(玩家未回应)',
+    },
     markdown_escape_strings: '',
     chat_truncation: 100,
     streaming_fps: 30,
@@ -202,6 +207,7 @@ export const power_user = {
     enableLabMode: false,
     prefer_character_prompt: true,
     prefer_character_jailbreak: true,
+    pure_mode: false,
     quick_continue: false,
     quick_impersonate: false,
     continue_on_send: false,
@@ -1700,6 +1706,9 @@ export async function loadPowerUserSettings(settings, data) {
     $('#auto_continue_enabled').prop('checked', power_user.auto_continue.enabled);
     $('#auto_continue_allow_chat_completions').prop('checked', power_user.auto_continue.allow_chat_completions);
     $('#auto_continue_target_length').val(power_user.auto_continue.target_length);
+    $('#time_perception_enabled').prop('checked', power_user.time_perception.enabled);
+    $('#time_perception_default_timeout').val(power_user.time_perception.default_timeout);
+    $('#time_perception_placeholder').val(power_user.time_perception.placeholder);
     $('#play_message_sound').prop('checked', power_user.play_message_sound);
     $('#play_sound_unfocused').prop('checked', power_user.play_sound_unfocused);
     $('#never_resize_avatars').prop('checked', power_user.never_resize_avatars);
@@ -1716,6 +1725,7 @@ export async function loadPowerUserSettings(settings, data) {
     $('#hideChatAvatarsEnabled').prop('checked', power_user.hideChatAvatars_enabled);
     $('#prefer_character_prompt').prop('checked', power_user.prefer_character_prompt);
     $('#prefer_character_jailbreak').prop('checked', power_user.prefer_character_jailbreak);
+    $('#pure_mode').prop('checked', power_user.pure_mode);
     $('#enableZenSliders').prop('checked', power_user.enableZenSliders).trigger('input');
     $('#enableLabMode').prop('checked', power_user.enableLabMode).trigger('input', { fromInit: true });
     $(`input[name="avatar_style"][value="${power_user.avatar_style}"]`).prop('checked', true);
@@ -3306,6 +3316,24 @@ jQuery(() => {
         saveSettingsDebounced();
     });
 
+    $('#time_perception_enabled').on('change', function () {
+        power_user.time_perception.enabled = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#time_perception_default_timeout').on('input', function () {
+        const val = Number($(this).val());
+        if (Number.isFinite(val) && val >= 1 && val <= 10) {
+            power_user.time_perception.default_timeout = val;
+            saveSettingsDebounced();
+        }
+    });
+
+    $('#time_perception_placeholder').on('input', function () {
+        power_user.time_perception.placeholder = String($(this).val());
+        saveSettingsDebounced();
+    });
+
     $('#example_messages_behavior').on('change', function () {
         const selectedOption = String($(this).find(':selected').val());
         console.log('Setting example messages behavior to', selectedOption);
@@ -3764,6 +3792,12 @@ jQuery(() => {
     $('#prefer_character_jailbreak').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.prefer_character_jailbreak = value;
+        saveSettingsDebounced();
+    });
+
+    $('#pure_mode').on('input', function () {
+        const value = !!$(this).prop('checked');
+        power_user.pure_mode = value;
         saveSettingsDebounced();
     });
 

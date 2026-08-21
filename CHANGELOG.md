@@ -4,6 +4,24 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.2] - 2026-08-21
+
+### ✨ 新增
+
+- **纯净模式**：新增 `power_user.pure_mode` 开关（User Settings 面板 +
+  `/pure-mode` 斜杠命令）。开启后禁用酒馆自带的全部系统提示词注入
+  （main / nsfw / jailbreak / 角色描述·性格·场景·人设 / 世界书前后 /
+  作者备注 / summary / vectors / bias 等），只把对话回合发给模型，用于
+  角色扮演之外的场景。同时覆盖 Chat Completion（`populateChatCompletion`
+  短路）与 Text Completion（`Generate` 置空 storyString）两条管线。
+- **时间感知**：新增 `power_user.time_perception` 开关（含 `default_timeout`、
+  `placeholder`）。AI 回合一结束，由 AI 自己决定等待玩家多久（限制 1~10 分钟，
+  取值失败回退 `default_timeout`）；到点玩家仍无回应则插入一条可见的用户侧
+  占位消息（默认 `(玩家未回应)`）再触发生成，让角色对“沉默”做出反应。
+  监听输入框：框内非空（玩家正在输入）时暂停计时并重置，打字慢不会被误判
+  为无回应。仅 1 对 1 聊天。以 `isRunningDurationQuery` + `timePerceptionCycleId`
+  防止 quiet 时长查询的 `GENERATION_ENDED` 递归与跨会话脏写。
+
 ## [1.18.0-patch-2.1.3] - 2026-08-20
 
 ### ✨ 新增

@@ -1176,6 +1176,13 @@ export function getPromptRole(role) {
  * @returns {Promise<void>}
  */
 async function populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, quietImage, type, cyclePrompt, messages, messageExamples }) {
+    // Pure mode: send only conversation turns, skip all injected system/extension/control prompts
+    if (power_user.pure_mode) {
+        chatCompletion.reserveBudget(3); // assistant reply priming
+        await populateChatHistory(messages, prompts, chatCompletion, type, cyclePrompt);
+        return;
+    }
+
     // Helper function for preparing a prompt, that already exists within the prompt collection, for completion
     const addToChatCompletion = async (source, target = null) => {
         // We need the prompts array to determine a position for the source.

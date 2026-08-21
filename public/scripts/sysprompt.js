@@ -123,6 +123,18 @@ function toggleSystemPromptCallback(_args, state) {
     return String(power_user.sysprompt.enabled);
 }
 
+function togglePureModeCallback(_args, state) {
+    if (!state || typeof state !== 'string') {
+        return String(power_user.pure_mode);
+    }
+
+    const newState = isTrueBoolean(state);
+    power_user.pure_mode = newState;
+    $('#pure_mode').prop('checked', newState);
+    saveSettingsDebounced();
+    return String(power_user.pure_mode);
+}
+
 function selectSystemPromptCallback(args, name) {
     if (!power_user.sysprompt.enabled && !isTrueBoolean(args.forceGet)) {
         return '';
@@ -260,5 +272,18 @@ export function initSystemPrompts() {
             }),
         ],
         callback: toggleSystemPromptCallback,
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'pure-mode',
+        aliases: ['puremode'],
+        helpString: 'Gets the current pure mode state. If an argument is provided, sets the pure mode state. Pure mode disables all built-in system prompts, sending only conversation turns to the model.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'pure mode state',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
+        callback: togglePureModeCallback,
     }));
 }

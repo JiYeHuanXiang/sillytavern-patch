@@ -5224,6 +5224,32 @@
 
                         </div>
 
+                        <div name="PureModeToggles">
+                            <h4><span data-i18n="Pure Mode">Pure Mode</span></h4>
+                            <label class="checkbox_label" for="pure_mode" title="Disable all built-in system prompts (main, jailbreak, NSFW, character card, world info, author's notes, etc.). Only the conversation turns are sent to the model. Intended for non-roleplay scenarios." data-i18n="[title]Disable all built-in system prompts. Only conversation turns are sent to the model. Intended for non-roleplay scenarios.">
+                                <input id="pure_mode" type="checkbox" />
+                                <small data-i18n="Pure Mode">Pure Mode</small>
+                            </label>
+                        </div>
+
+                        <div name="TimePerceptionToggles">
+                            <h4><span data-i18n="Time Perception">Time Perception</span></h4>
+                            <label class="checkbox_label" for="time_perception_enabled" title="After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to 1-10 minutes." data-i18n="[title]After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to 1-10 minutes.">
+                                <input id="time_perception_enabled" type="checkbox" />
+                                <small data-i18n="Enable Time Perception">Enable Time Perception</small>
+                            </label>
+                            <div class="time_perception_settings_block">
+                                <label for="time_perception_default_timeout">
+                                    <small data-i18n="Default Wait (min)">Default Wait (min)</small>
+                                    <input id="time_perception_default_timeout" type="number" class="text_pole textarea_compact" min="1" max="10" />
+                                </label>
+                                <label for="time_perception_placeholder">
+                                    <small data-i18n="No-Response Placeholder">No-Response Placeholder</small>
+                                    <input id="time_perception_placeholder" type="text" class="text_pole textarea_compact" />
+                                </label>
+                            </div>
+                        </div>
+
                         <div name="MiscellaneousToggles">
                             <h4><span data-i18n="Miscellaneous">Miscellaneous</span></h4>
                             <div class="flex-container flexGap2">

@@ -5025,9 +5025,18 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
     // Add persona description to prompt
     addPersonaDescriptionExtensionPrompt();
 
+    // Pure mode (Text Completion): strip built-in framing from the story string
+    if (power_user.pure_mode) {
+        description = '';
+        personality = '';
+        persona = '';
+        scenario = '';
+        mesExamplesArray = [];
+    }
+
     // Prepare the system prompt for Text Completion APIs
     if (main_api !== 'openai') {
-        if (power_user.sysprompt.enabled) {
+        if (power_user.sysprompt.enabled && !power_user.pure_mode) {
             system = power_user.prefer_character_prompt && system
                 ? substituteParams(system, { original: power_user.sysprompt.content ?? '' })
                 : baseChatReplace(power_user.sysprompt.content);
@@ -5060,6 +5069,17 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         mesExamplesRaw: mesExamplesRawArray.join(''),
     };
 
+    // Pure mode: nullify const-derived fields (world info / anchors / raw examples) on the params object
+    if (power_user.pure_mode) {
+        storyStringParams.wiBefore = '';
+        storyStringParams.wiAfter = '';
+        storyStringParams.loreBefore = '';
+        storyStringParams.loreAfter = '';
+        storyStringParams.anchorBefore = '';
+        storyStringParams.anchorAfter = '';
+        storyStringParams.mesExamplesRaw = '';
+    }
+
     // Render the story string and combine with injections
     const storyString = renderStoryString(storyStringParams);
     let combinedStoryString = isInstruct ? formatInstructModeStoryString(storyString) : storyString;
@@ -5087,7 +5107,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         injectedIndices = await doChatInject(coreChat, isContinue);
     }
 
-    if (main_api !== 'openai' && power_user.sysprompt.enabled) {
+    if (main_api !== 'openai' && power_user.sysprompt.enabled && !power_user.pure_mode) {
         jailbreak = power_user.prefer_character_jailbreak && jailbreak
             ? substituteParams(jailbreak, { original: power_user.sysprompt.post_history ?? '' })
             : baseChatReplace(power_user.sysprompt.post_history);
@@ -6132,6 +6152,128 @@ export function triggerAutoContinue(messageChunk, isImpersonate) {
         $('#option_continue').trigger('click');
     }
 }
+
+// MARK: Time Perception
+// After a character reply, the AI picks how long to wait (1-10 min). On no-response timeout,
+// insert a visible user-side placeholder and let the character react to the silence.
+const TIME_PERCEPTION_MIN_TIMEOUT = 1;
+const TIME_PERCEPTION_MAX_TIMEOUT = 10;
+let timePerceptionTimer = null;
+let timePerceptionDuration = null;
+let isRunningDurationQuery = false;
+let timePerceptionCycleId = 0;
+
+function shouldStartTimePerception() {
+    if (!power_user.time_perception?.enabled) return false;
+    if (is_send_press) return false;
+    if (selected_group) return false; // 1:1 chats only, like auto-continue
+    if (abortController && abortController.signal.aborted) return false;
+    if (String($('#send_textarea').val()).length > 0) return false; // player is composing
+    if (!chat || !chat.length) return false;
+    const lastMessage = chat[chat.length - 1];
+    return !!lastMessage && !lastMessage.is_user && !lastMessage.is_system;
+}
+
+function cancelTimePerceptionTimer() {
+    if (timePerceptionTimer) {
+        clearTimeout(timePerceptionTimer);
+        timePerceptionTimer = null;
+    }
+}
+
+function resetTimePerceptionCycle() {
+    timePerceptionCycleId++;
+    cancelTimePerceptionTimer();
+    timePerceptionDuration = null;
+}
+
+async function queryTimePerceptionDuration() {
+    const queryPrompt = `你刚刚对{{user}}说完话，正在等待{{user}}回应。请只回复一个 ${TIME_PERCEPTION_MIN_TIMEOUT} 到 ${TIME_PERCEPTION_MAX_TIMEOUT} 之间的整数，表示你愿意等待{{user}}多少分钟后再自行采取行动。只输出数字，不要任何其他文字或标点。`;
+    try {
+        const answer = await generateQuietPrompt({ quietPrompt: queryPrompt, quietToLoud: false });
+        const match = String(answer).match(/\d+/);
+        if (match) {
+            const minutes = Math.floor(Number(match[0]));
+            if (Number.isFinite(minutes)) {
+                return Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(TIME_PERCEPTION_MIN_TIMEOUT, minutes));
+            }
+        }
+    } catch (error) {
+        console.error('Time perception: duration query failed', error);
+    }
+    const fallback = Number(power_user.time_perception?.default_timeout);
+    return Number.isFinite(fallback)
+        ? Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(TIME_PERCEPTION_MIN_TIMEOUT, Math.floor(fallback)))
+        : 2;
+}
+
+async function startTimePerceptionCycle() {
+    if (isRunningDurationQuery) return;
+    if (!shouldStartTimePerception()) return;
+
+    const myId = ++timePerceptionCycleId;
+    cancelTimePerceptionTimer();
+
+    if (timePerceptionDuration == null) {
+        isRunningDurationQuery = true;
+        try {
+            timePerceptionDuration = await queryTimePerceptionDuration();
+        } catch (error) {
+            console.error('Time perception: duration query error', error);
+            timePerceptionDuration = null;
+        } finally {
+            isRunningDurationQuery = false;
+        }
+    }
+
+    // Superseded by a newer cycle (chat changed / new generation / user sent)
+    if (myId !== timePerceptionCycleId) return;
+    // Guards may have changed during the (possibly slow) quiet generation
+    if (!shouldStartTimePerception()) return;
+
+    const minutes = timePerceptionDuration ?? 2;
+    timePerceptionTimer = setTimeout(onTimePerceptionTimeout, minutes * 60000);
+}
+
+async function onTimePerceptionTimeout() {
+    timePerceptionTimer = null;
+    if (!shouldStartTimePerception()) return;
+
+    const placeholder = power_user.time_perception?.placeholder || '(玩家未回应)';
+    try {
+        // Insert a visible user-side placeholder (does not touch the textarea or steal focus)
+        await sendMessageAsUser(placeholder);
+        // automatic_trigger prevents Generate from reading/pushing the textarea again
+        await Generate('normal', { automatic_trigger: true });
+    } catch (error) {
+        console.error('Time perception: failed to fire no-response turn', error);
+    }
+}
+
+// Start waiting after a real character turn ends (skip the duration query's own generation)
+eventSource.on(event_types.GENERATION_ENDED, () => {
+    if (isRunningDurationQuery) return;
+    if (!power_user.time_perception?.enabled) return;
+    startTimePerceptionCycle();
+});
+// Cancel on any new generation (swipe / continue / regenerate / send-triggered)
+eventSource.on(event_types.GENERATION_STARTED, () => {
+    if (isRunningDurationQuery) return;
+    resetTimePerceptionCycle();
+});
+// Cancel when the player responds
+eventSource.on(event_types.MESSAGE_SENT, () => resetTimePerceptionCycle());
+// Cancel on chat switch
+eventSource.on(event_types.CHAT_CHANGED, () => resetTimePerceptionCycle());
+eventSource.on(event_types.CHAT_LOADED, () => resetTimePerceptionCycle());
+// Pause while the player is typing; resume when the box is emptied again (slow typers are never marked silent)
+$('#send_textarea').on('input', () => {
+    if (String($('#send_textarea').val()).length > 0) {
+        cancelTimePerceptionTimer();
+    } else if (shouldStartTimePerception() && !timePerceptionTimer) {
+        startTimePerceptionCycle();
+    }
+});
 
 export function getBiasStrings(textareaText, type) {
     if (type == 'impersonate' || type == 'continue') {
