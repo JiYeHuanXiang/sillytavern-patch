@@ -79,4 +79,11 @@ log.txt
 unfav-all.mjs
 frp/*
 Android/*
-
+# 预备的msi工具
+packaging/license.rtf
+packaging/README.md
+packaging/sillytavern.wxs
+scripts/build-msi.ps1
+# 文档
+提交记录整理.md
+下版本目标.txt

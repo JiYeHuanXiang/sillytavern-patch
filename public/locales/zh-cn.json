@@ -881,6 +881,7 @@
     "After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to 1-10 minutes.": "AI 回复后等待玩家回应；超时则 AI 继续对玩家的沉默做出反应。等待时长由 AI 决定，限制在 1-10 分钟之间。",
     "Default Wait (min)": "默认等待（分钟）",
     "No-Response Placeholder": "无回应占位文本",
+    "Waiting for player response": "等待玩家回应",
     "Reload and redraw the currently open chat": "重新加载并重新渲染当前打开的聊天",
     "Reload Chat": "重新加载聊天",
     "Debug Menu": "调试菜单",

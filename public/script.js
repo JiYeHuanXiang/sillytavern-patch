@@ -6162,6 +6162,7 @@ let timePerceptionTimer = null;
 let timePerceptionDuration = null;
 let isRunningDurationQuery = false;
 let timePerceptionCycleId = 0;
+let timePerceptionDisplayInterval = null;
 
 function shouldStartTimePerception() {
     if (!power_user.time_perception?.enabled) return false;
@@ -6179,6 +6180,7 @@ function cancelTimePerceptionTimer() {
         clearTimeout(timePerceptionTimer);
         timePerceptionTimer = null;
     }
+    stopTimePerceptionDisplay();
 }
 
 function resetTimePerceptionCycle() {
@@ -6187,8 +6189,37 @@ function resetTimePerceptionCycle() {
     timePerceptionDuration = null;
 }
 
+function startTimePerceptionDisplay(minutes) {
+    stopTimePerceptionDisplay();
+    const targetTime = Date.now() + minutes * 60000;
+    const $timer = $('#time_perception_timer');
+
+    function update() {
+        const remaining = Math.max(0, targetTime - Date.now());
+        if (remaining <= 0) {
+            stopTimePerceptionDisplay();
+            return;
+        }
+        const m = Math.floor(remaining / 60000);
+        const s = Math.floor((remaining % 60000) / 1000);
+        $timer.text(`${m}:${String(s).padStart(2, '0')}`);
+    }
+
+    $timer.show();
+    update();
+    timePerceptionDisplayInterval = setInterval(update, 1000);
+}
+
+function stopTimePerceptionDisplay() {
+    if (timePerceptionDisplayInterval) {
+        clearInterval(timePerceptionDisplayInterval);
+        timePerceptionDisplayInterval = null;
+    }
+    $('#time_perception_timer').hide();
+}
+
 async function queryTimePerceptionDuration() {
-    const queryPrompt = `你刚刚对{{user}}说完话，正在等待{{user}}回应。请只回复一个 ${TIME_PERCEPTION_MIN_TIMEOUT} 到 ${TIME_PERCEPTION_MAX_TIMEOUT} 之间的整数，表示你愿意等待{{user}}多少分钟后再自行采取行动。只输出数字，不要任何其他文字或标点。`;
+    const queryPrompt = `（时间感知系统）你刚对{{user}}说完话，正在等待回应。系统会按你选择的等待时间，在{{user}}沉默后自动提醒你做出反应。请只回复 ${TIME_PERCEPTION_MIN_TIMEOUT} 到 ${TIME_PERCEPTION_MAX_TIMEOUT} 之间的整数，表示你愿意等几分钟。只输出数字，不要其他文字或标点。`;
     try {
         const answer = await generateQuietPrompt({ quietPrompt: queryPrompt, quietToLoud: false });
         const match = String(answer).match(/\d+/);
@@ -6233,18 +6264,24 @@ async function startTimePerceptionCycle() {
 
     const minutes = timePerceptionDuration ?? 2;
     timePerceptionTimer = setTimeout(onTimePerceptionTimeout, minutes * 60000);
+    startTimePerceptionDisplay(minutes);
 }
 
 async function onTimePerceptionTimeout() {
     timePerceptionTimer = null;
+    stopTimePerceptionDisplay();
     if (!shouldStartTimePerception()) return;
 
     const placeholder = power_user.time_perception?.placeholder || '(玩家未回应)';
+    const minutes = timePerceptionDuration ?? 2;
     try {
         // Insert a visible user-side placeholder (does not touch the textarea or steal focus)
         await sendMessageAsUser(placeholder);
+        // Give the AI context about the silence so it reacts meaningfully instead of
+        // treating the placeholder as an ordinary user message.
+        const contextPrompt = `（时间感知系统）{{user}}已沉默${minutes}分钟未回应。请自然地对这份沉默做出反应如猜测{{user}}在做什么、或自行采取行动。`;
         // automatic_trigger prevents Generate from reading/pushing the textarea again
-        await Generate('normal', { automatic_trigger: true });
+        await Generate('normal', { automatic_trigger: true, quiet_prompt: contextPrompt });
     } catch (error) {
         console.error('Time perception: failed to fire no-response turn', error);
     }

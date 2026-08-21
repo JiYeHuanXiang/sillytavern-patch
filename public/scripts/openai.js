@@ -1179,6 +1179,25 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
     // Pure mode: send only conversation turns, skip all injected system/extension/control prompts
     if (power_user.pure_mode) {
         chatCompletion.reserveBudget(3); // assistant reply priming
+        // Reverse to chronological order — populateChatHistory expects the same
+        // pre-reversed input that populationInjectionPrompts produces in the normal path.
+        messages = messages.reverse();
+
+        // Still include the quiet prompt (extension instruction, not a built-in system prompt)
+        if (quietPrompt) {
+            const quietPromptMessage = await Message.fromPromptAsync(prompts.get('quietPrompt')) ?? null;
+            if (quietPromptMessage && quietPromptMessage.content) {
+                if (isImageInliningSupported() && quietImage) {
+                    await quietPromptMessage.addImage(quietImage);
+                }
+                const controlPrompts = new MessageCollection('controlPrompts');
+                controlPrompts.add(quietPromptMessage);
+                chatCompletion.reserveBudget(controlPrompts);
+                chatCompletion.freeBudget(controlPrompts);
+                if (controlPrompts.collection.length) chatCompletion.add(controlPrompts);
+            }
+        }
+
         await populateChatHistory(messages, prompts, chatCompletion, type, cyclePrompt);
         return;
     }

@@ -1062,6 +1062,16 @@ body .panelControlBar {
     filter: brightness(1.2);
 }
 
+#time_perception_timer {
+    width: auto !important;
+    min-width: var(--bottomFormBlockSize);
+    padding: 0 6px;
+    font-size: calc(var(--bottomFormIconSize) * 0.7);
+    font-variant-numeric: tabular-nums;
+    cursor: default;
+    opacity: 0.8;
+}
+
 #send_but {
     order: 2;
 }
