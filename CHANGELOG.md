@@ -4,6 +4,31 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.2.1] - 2026-08-23
+
+### 🐛 修复
+
+- **新聊天首次保存失败（ENOENT→500）**：多窗口保护在 `trySaveChat` 保存前
+  预读旧聊天文件首行以比对版本号，但 `readFirstLine` 对尚不存在的文件会
+  直接 reject（ENOENT）。导致**每个全新聊天文件的首次保存**必然返回 500，
+  前端弹出「聊天内容无法保存，请检查服务器的连接」。最易复现场景：启动后
+  未选角色的基础角色（Assistant）临时聊天里发送第一条消息。加 `fs.existsSync`
+  守卫，文件不存在时视为「无首行」（与同文件 `checkChatIntegrity` 既有逻辑
+  一致）。附 `tests/chats-save.test.js` 回归测试。
+
+### 🔧 调整
+
+- **怠惰加载默认开启**：`performance.lazyLoadCharacters` 默认值由 `false`
+  改为 `true`（`default/config.yaml` + 服务端 `getConfigValue` 默认值同步），
+  缓解角色列表过大时的首屏序列化卡顿。
+- **时间感知提示文微调**：沉默反应上下文提示语补一处标点空格。
+
+### 🔨 工程
+
+- **类型标注修正**：上述 ENOENT 修复让 `trySaveChat` 向 `checkChatRevision`
+  传入 `string | null`，但其 JSDoc 形参仅标注为 `string`，CI 的
+  informational typecheck 报错。修正为 `string | null`（运行时行为不变）。
+
 ## [1.18.0-patch-2.2] - 2026-08-21
 
 ### ✨ 新增
