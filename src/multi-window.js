@@ -124,7 +124,7 @@ export function readChatRevisionFromFirstLine(firstLine) {
  * no `rev` (first save of a chat). This mirrors the leniency of the existing
  * integrity check so enabling the flag never blocks a legitimate first save.
  *
- * @param {string} firstLine First line of the on-disk chat (null/empty if absent)
+ * @param {string | null} firstLine First line of the on-disk chat (null/empty if absent)
  * @param {number | undefined} clientRev The revision the client loaded with
  * @param {boolean} force Whether the client requested a forced overwrite
  * @param {boolean} [enabled] Whether multi-window protection is on; defaults to the module flag.
