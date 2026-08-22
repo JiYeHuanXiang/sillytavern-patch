@@ -501,7 +501,10 @@ export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false
     }
 
     // Multi-window lost-update check (no-op when the flag is off or the save is forced).
-    const onDiskFirstLine = await readFirstLine(filePath);
+    // A brand-new chat file doesn't exist yet — treat that as "no first line"
+    // (same leniency as checkChatIntegrity above) instead of letting the
+    // read reject with ENOENT and 500 the first save of every new chat.
+    const onDiskFirstLine = fs.existsSync(filePath) ? await readFirstLine(filePath) : null;
     const isForced = !!skipIntegrityCheck;
     const revCheck = checkChatRevision(onDiskFirstLine, clientRev, isForced, isMultiWindowEnabled());
     if (revCheck.conflict) {

@@ -64,6 +64,7 @@ test-results/
 # AI 辅助工具元数据 / 本地配置（非项目文件）
 .gemini/
 .lingma/
+tests/.mimosa/*
 .mimosa/*
 # 大体积归档文件（如 st.7z），防止误入仓库
 *.7z
