@@ -35,7 +35,7 @@ const memoryCache = new MemoryLimitedMap(memoryCacheCapacity);
 // Some Android devices require tighter memory management
 const isAndroid = process.platform === 'android';
 // Use shallow character data for the character list
-const useShallowCharacters = !!getConfigValue('performance.lazyLoadCharacters', false, 'boolean');
+const useShallowCharacters = !!getConfigValue('performance.lazyLoadCharacters', true, 'boolean');
 const useDiskCache = !!getConfigValue('performance.useDiskCache', true, 'boolean');
 
 // Concurrency for the character-list stat scan. Android/Termux defaults to a small value to avoid

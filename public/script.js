@@ -6279,7 +6279,7 @@ async function onTimePerceptionTimeout() {
         await sendMessageAsUser(placeholder);
         // Give the AI context about the silence so it reacts meaningfully instead of
         // treating the placeholder as an ordinary user message.
-        const contextPrompt = `（时间感知系统）{{user}}已沉默${minutes}分钟未回应。请自然地对这份沉默做出反应如猜测{{user}}在做什么、或自行采取行动。`;
+        const contextPrompt = `（时间感知系统）{{user}}已沉默${minutes}分钟未回应。请自然地对这份沉默做出反应,如 猜测{{user}}在做什么、或自行采取行动。`;
         // automatic_trigger prevents Generate from reading/pushing the textarea again
         await Generate('normal', { automatic_trigger: true, quiet_prompt: contextPrompt });
     } catch (error) {
