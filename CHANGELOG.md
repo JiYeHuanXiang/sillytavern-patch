@@ -8,6 +8,14 @@
 
 ### 🐛 修复
 
+- **时间感知计时器启动后被 dryRun 生成误清**：`Generate` 在 dryRun
+  （token 计数 / prompt 预览）时也会无条件发射 `GENERATION_STARTED`
+  （发射点在 dryRun 判断之前），而 `GENERATION_STARTED` 监听器只守卫了
+  `isRunningDurationQuery`、没守卫 `dryRun`。quiet 时长查询一结束
+  `isRunningDurationQuery` 即回 false，紧随其后的 dryRun 生成触发的
+  `GENERATION_STARTED` 便畅通无阻地调用 `resetTimePerceptionCycle()`，
+  把刚启动的 `setTimeout` 和倒计时 UI 一并清掉——表现为计时器永远不出现。
+  修复：监听器接收 `dryRun` 参数并跳过（dryRun 不是真实生成，不应取消等待）。
 - **新聊天首次保存失败（ENOENT→500）**：多窗口保护在 `trySaveChat` 保存前
   预读旧聊天文件首行以比对版本号，但 `readFirstLine` 对尚不存在的文件会
   直接 reject（ENOENT）。导致**每个全新聊天文件的首次保存**必然返回 500，

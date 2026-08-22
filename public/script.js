@@ -6294,8 +6294,9 @@ eventSource.on(event_types.GENERATION_ENDED, () => {
     startTimePerceptionCycle();
 });
 // Cancel on any new generation (swipe / continue / regenerate / send-triggered)
-eventSource.on(event_types.GENERATION_STARTED, () => {
+eventSource.on(event_types.GENERATION_STARTED, (type, options, dryRun) => {
     if (isRunningDurationQuery) return;
+    if (dryRun) return; // dryRun (token count / prompt preview) is not a real generation — don't cancel the timer
     resetTimePerceptionCycle();
 });
 // Cancel when the player responds
