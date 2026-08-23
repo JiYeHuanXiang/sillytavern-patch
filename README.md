@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.2.1-brightgreen.svg)](CHANGELOG.md)
 [![Android Client](https://img.shields.io/badge/Android%20Client-ST--patch--android-3DDC84.svg?logo=android&logoColor=white)](https://github.com/JiYeHuanXiang/ST-patch-android)
 
 A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/SillyTavern) with targeted improvements for **Chinese domestic LLMs** and **large character card collections**.
@@ -32,6 +32,14 @@ A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/Sill
   > Adds a "Render complete HTML pages as sandboxed preview" toggle (on by default) in user settings under message display. Full HTML pages in `first_mes` are embedded directly in the chat as iframes with source/preview switching; HTML code blocks in regular messages get a "Preview HTML" button that opens a popup with the rendered result.
   >
   > This also fixes the upstream behavior of dumping full HTML pages as plain code blocks.
+- **Pure Mode**: Adds a `pure_mode` toggle (User Settings panel + `/pure-mode` slash command). When enabled, it disables all of SillyTavern's built-in system prompt injection — main / nsfw / jailbreak / character description·personality·scenario·persona / world book before & after / author's note / summary / vectors / bias, etc. — and sends only the conversation turns to the model. Useful for non-roleplay use cases. Covers both the Chat Completion and Text Completion pipelines.
+- **Time Perception**: Adds a `time_perception` toggle (with `default_timeout` and `placeholder` options). After an AI turn ends, the AI itself decides how long to wait for the player (clamped to 1–10 minutes; falls back to `default_timeout` on parse failure). If the player hasn't responded when the timer fires, a visible user-side placeholder message (default `(玩家未回应)`) is inserted and a new generation is triggered, so the character can react to the "silence." Typing in the input box pauses and resets the timer so slow typists aren't misjudged as absent. **1-on-1 chats only.**
+
+### Stability & Robustness
+
+- **Multi-window lost-update protection**: Opening the same account in two tabs no longer silently corrupts data (settings ping-pong overwrite, lost chat messages). Adds optimistic locking + conflict detection behind a `multiWindow.enabled` config flag (off by default — disabled behavior is byte-identical to older versions). A stale version returns HTTP 409 `conflict` instead of a silent overwrite, and the frontend offers reload / force-overwrite / cancel.
+- **Automatic port fallback**: If the configured port is in use, startup retries the next ports (up to 100) instead of failing outright. Enabled by default via `enableAutoPortFallback`.
+- **Lazy character loading on by default**: `performance.lazyLoadCharacters` now defaults to `true`, easing the first-paint serialization stall with very large character card collections.
 
 ### Trimming & Optimizations
 
@@ -96,6 +104,9 @@ The main config file is [`config.yaml`](config.yaml). Common options:
 - `whitelistMode` / `whitelist` — IP whitelist; by default only localhost is allowed
 - `listen` — whether to listen on all network interfaces (default `false`, localhost only)
 - `performance.characterListConcurrency` — character card scan concurrency
+- `performance.lazyLoadCharacters` — lazy-load the character list to reduce first-paint stalls (default `true`)
+- `enableAutoPortFallback` — retry the next ports when the configured port is in use (default `true`)
+- `multiWindow.enabled` — enable optimistic-lock protection against multi-tab data loss (default `false`)
 - `securityOverride` / `disableCsrfProtection` — security toggles; **use with caution**
 
 > On first launch, a user data directory is automatically created under `data/` (default user `default-user`). Character cards go in `data/default-user/characters/` — subdirectories are supported.

@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.1-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.2.1-brightgreen.svg)](CHANGELOG.md)
 
 基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
 
@@ -32,6 +32,14 @@
   > 用户设置的消息显示区域新增"将完整 HTML 页面渲染为沙箱预览"开关（默认开启）。角色卡 `first_mes` 中的完整 HTML 页面会直接以 iframe 形式内嵌在聊天中，并支持源码/预览切换；普通消息中的 HTML 代码块会显示"预览 HTML"按钮，点击后在弹窗中查看渲染效果。
   >
   > 该功能同时修复了原版遇到完整 HTML 页面时只能直接显示代码块的问题。
+- **纯净模式**：新增 `pure_mode` 开关（User Settings 面板 + `/pure-mode` 斜杠命令）。开启后禁用酒馆自带的全部系统提示词注入（main / nsfw / jailbreak / 角色描述·性格·场景·人设 / 世界书前后 / 作者备注 / summary / vectors / bias 等），只把对话回合发给模型，适用于角色扮演之外的场景。同时覆盖 Chat Completion 与 Text Completion 两条管线。
+- **时间感知**：新增 `time_perception` 开关（含 `default_timeout`、`placeholder`）。AI 回合一结束，由 AI 自己决定等待玩家多久（限制 1~10 分钟，取值失败回退 `default_timeout`）；到点玩家仍无回应则插入一条可见的用户侧占位消息（默认 `(玩家未回应)`）再触发生成，让角色对"沉默"做出反应。监听输入框：框内非空（玩家正在输入）时暂停计时并重置，打字慢不会被误判为无回应。**仅 1 对 1 聊天。**
+
+### 稳定性与健壮性
+
+- **多窗口数据安全**：同一账号开两个窗口不再静默损坏数据（settings 乒乓覆盖、聊天消息丢失）。新增乐观锁 + 冲突检测，藏在 `multiWindow.enabled` 配置开关后（默认关，关闭时行为与旧版字节一致）。版本过期返回 HTTP 409 `conflict` 而非静默覆盖，前端提供「重载 / 强制覆盖 / 取消」选项。
+- **端口占用自动回退**：配置端口被占用时，启动按后续端口顺序重试（最多 100 个），不再直接启动失败。默认开启（`enableAutoPortFallback`）。
+- **怠惰加载默认开启**：`performance.lazyLoadCharacters` 默认值由 `false` 改为 `true`，缓解角色列表过大时的首屏序列化卡顿。
 
 ### 精简与优化
 
@@ -96,6 +104,9 @@ docker compose up -d
 - `whitelistMode` / `whitelist`：IP 白名单，默认仅允许本机访问
 - `listen`：是否监听所有网卡（默认 `false`，仅本机）
 - `performance.characterListConcurrency`：角色卡扫描并发数
+- `performance.lazyLoadCharacters`：怠惰加载角色列表以减少首屏卡顿（默认 `true`）
+- `enableAutoPortFallback`：端口被占用时自动重试后续端口（默认 `true`）
+- `multiWindow.enabled`：开启多窗口乐观锁保护，防止多标签页数据丢失（默认 `false`）
 - `securityOverride` / `disableCsrfProtection`：安全相关开关，**请谨慎使用**
 
 > 首次启动会自动在 `data/` 下创建用户数据目录（默认用户 `default-user`），角色卡放在 `data/default-user/characters/`，支持子目录。
