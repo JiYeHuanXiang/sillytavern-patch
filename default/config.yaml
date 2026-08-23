@@ -265,7 +265,12 @@ thumbnails:
 performance:
   # Enables lazy loading of character cards. Improves performances with large card libraries.
   # May have compatibility issues with some extensions.
-  lazyLoadCharacters: true
+  # "true" always serves shallow metadata, "false" always serves full cards,
+  # "auto" serves shallow metadata only when the library has more cards than the threshold below.
+  lazyLoadCharacters: auto
+  # Card count at which "auto" mode switches to the shallow list. The full-card path still falls
+  # back to shallow automatically if a single response exceeds the serialization limit.
+  lazyLoadCharactersThreshold: 3000
   # The maximum amount of memory that parsed character cards can use. Set to 0 to disable memory caching.
   memoryCacheCapacity: '100mb'
   # Enables disk caching for character cards. Improves performances with large card libraries.

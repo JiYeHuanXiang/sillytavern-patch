@@ -34,8 +34,21 @@ const memoryCacheCapacity = getConfigValue('performance.memoryCacheCapacity', '1
 const memoryCache = new MemoryLimitedMap(memoryCacheCapacity);
 // Some Android devices require tighter memory management
 const isAndroid = process.platform === 'android';
-// Use shallow character data for the character list
-const useShallowCharacters = !!getConfigValue('performance.lazyLoadCharacters', true, 'boolean');
+// Shallow character list mode: 'true', 'false', or 'auto'. 'auto' switches to the shallow list
+// only when the card count exceeds performance.lazyLoadCharactersThreshold.
+const lazyLoadMode = String(getConfigValue('performance.lazyLoadCharacters', true)).toLowerCase();
+const lazyLoadThreshold = getConfigValue('performance.lazyLoadCharactersThreshold', 3000, 'number');
+
+/** Whether the shallow list should be served for a library with the given card count. */
+const shouldUseShallowCharacters = (cardCount) => {
+    if (lazyLoadMode === 'auto') {
+        return cardCount > lazyLoadThreshold;
+    }
+    return lazyLoadMode !== 'false';
+};
+
+/** Whether the on-disk shallow index can hold entries (i.e. mode is not 'false'). */
+const isShallowIndexActive = () => lazyLoadMode !== 'false';
 const useDiskCache = !!getConfigValue('performance.useDiskCache', true, 'boolean');
 
 // Concurrency for the character-list stat scan. Android/Termux defaults to a small value to avoid
@@ -331,7 +344,7 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         // changed (mtimeMs/size) fingerprint and re-parse; we just mark dirty so the on-disk index
         // eventually reflects the new fingerprint (a stale fingerprint left behind would be cleared
         // by prune() on the next /all, but marking avoids an extra prune cycle).
-        if (useShallowCharacters) {
+        if (isShallowIndexActive()) {
             const relPath = `${outputFile}.png`;
             characterIndex.delete(request.user.profile.handle, relPath);
             // markDirty already called by delete(); debounced async flush will persist.
@@ -1257,7 +1270,7 @@ router.post('/rename', validateAvatarUrlMiddleware, async function (request, res
 
         // The index entry keyed under the old relative path is now stale; drop it and mark dirty so
         // the rename is reflected without waiting for the next /all prune.
-        if (useShallowCharacters) {
+        if (isShallowIndexActive()) {
             characterIndex.delete(request.user.profile.handle, oldAvatarName);
             // markDirty already called by delete(); debounced async flush will persist.
         }
@@ -1617,7 +1630,7 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
     }
 
     // Remove the deleted card from the index so it doesn't linger until the next /all prune.
-    if (useShallowCharacters) {
+    if (isShallowIndexActive()) {
         characterIndex.delete(request.user.profile.handle, request.body.avatar_url);
         // markDirty already called by delete(); debounced async flush will persist.
     }
@@ -1657,7 +1670,7 @@ router.post('/delete', validateAvatarUrlMiddleware, async function (request, res
 router.post('/all', async function (request, response) {
     try {
         const pngFiles = await findPngFilesRecursiveAsync(request.user.directories.characters);
-        if (useShallowCharacters) {
+        if (shouldUseShallowCharacters(pngFiles.length)) {
             // Fast path: serve the character list from the on-disk index, only parsing PNG files
             // whose fingerprint changed. Falls back to full parsing for cache misses.
             const data = await processCharacterList(pngFiles, request.user.directories, request.user.profile.handle);
@@ -1665,7 +1678,19 @@ router.post('/all', async function (request, response) {
         }
         const processingPromises = pngFiles.map(file => processCharacter(file, request.user.directories, { shallow: false }));
         const data = (await Promise.all(processingPromises)).filter(c => c.name);
-        return response.send(data);
+        try {
+            return response.send(data);
+        } catch (err) {
+            if (!(err instanceof RangeError)) {
+                throw err;
+            }
+            // Serializing the full list can exceed V8's max string length on huge libraries.
+            // Fall back to the shallow list instead of failing; the client loads the full
+            // card on demand when a character is selected.
+            console.warn('Character list too large to serialize; falling back to shallow characters. Set performance.lazyLoadCharacters to true (or lower performance.lazyLoadCharactersThreshold in auto mode) in config.yaml to use the fast path directly.', err);
+        }
+        const shallowData = await processCharacterList(pngFiles, request.user.directories, request.user.profile.handle);
+        return response.send(shallowData);
     } catch (err) {
         console.error(err);
         const isRangeError = err instanceof RangeError;
@@ -1837,7 +1862,7 @@ router.post('/duplicate', validateAvatarUrlMiddleware, async function (request, 
         // The duplicated card has a fresh mtime, so the index will treat it as a miss and parse it
         // on the next /all. Mark dirty to ensure the dirty flag is flushed even if no other mutation
         // follows, so prune() can't race the new entry on a crash.
-        if (useShallowCharacters) {
+        if (isShallowIndexActive()) {
             characterIndex.markDirty(request.user.profile.handle);
             // No flushSync — debounced async flush will persist the dirty flag.
         }
