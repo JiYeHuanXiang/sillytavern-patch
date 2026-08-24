@@ -46,6 +46,9 @@ heartbeatInterval: 0
 # Enable HTTP/HTTPS keep-alive globally.
 # Disabling restores old Node 18 behavior, can help if ECONNRESET and other network errors occur.
 enableKeepAlive: false
+# Trust X-Forwarded-* headers from a reverse proxy. Required for secure cookies behind TLS termination.
+# Only enable when SillyTavern is not directly reachable except through your trusted proxy.
+trustProxy: false
 # -- SSL options --
 ssl:
   # Enable SSL/TLS encryption
@@ -111,6 +114,12 @@ requestProxy:
   # Proxy URL. Possible protocols: http, https, socks, socks5, socks4, pac
   url: "socks5://username:password@example.com:1080"
   # Proxy bypass list. Requests to these hosts won't be routed through the proxy.
+  # Supported patterns:
+  #   - '*' to bypass all requests
+  #   - Domain: example.com, .example.com (matches subdomains), *.example.com
+  #   - Domain with port: example.com:8080
+  #   - CIDR: 192.168.0.0/16
+  #   - IP wildcard: 192.168.*.*
   bypass:
     - localhost
     - 127.0.0.1
@@ -195,6 +204,12 @@ privateAddressWhitelist:
 ## Set to 0 to expire session when the browser is closed
 ## Set to a negative number to disable session expiration
 sessionTimeout: -1
+# Session cookie attributes. Cross-site fetch/XHR requires sameSite: none and secure: true.
+sessionCookie:
+  # Allowed values: lax, strict, none
+  sameSite: lax
+  # Set to true when sameSite is none. Requires HTTPS from the browser's perspective.
+  secure: false
 # Disable CSRF protection - NOT RECOMMENDED
 disableCsrfProtection: false
 # Disable startup security checks - NOT RECOMMENDED

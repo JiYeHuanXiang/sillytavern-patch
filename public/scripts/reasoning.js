@@ -137,8 +137,10 @@ export function extractReasoningFromData(data, {
                         ?? data?.choices?.[0]?.message?.reasoning_content
                         ?? '';
                 case chat_completion_sources.MAKERSUITE:
-                case chat_completion_sources.VERTEXAI:
-                    return data?.responseContent?.parts?.filter(part => part.thought)?.map(part => part.text)?.join('\n\n') ?? '';
+                case chat_completion_sources.VERTEXAI: {
+                    const parts = data?.responseContent?.parts ?? data?.candidates?.[0]?.content?.parts ?? [];
+                    return parts.filter(part => part.thought).map(part => part.text).join('\n\n') || '';
+                }
                 case chat_completion_sources.CLAUDE:
                     return data?.content?.filter(part => part.type === 'thinking')?.map(part => part.thinking)?.join('\n\n') ?? '';
                 case chat_completion_sources.MISTRALAI:
@@ -1609,7 +1611,7 @@ function registerReasoningAppEvents() {
     }
 
     for (const event of [event_types.GENERATION_STOPPED, event_types.GENERATION_ENDED, event_types.CHAT_CHANGED]) {
-        eventSource.on(event, () => PromptReasoning.clearLatest());
+        eventSource.makeFirst(event, () => PromptReasoning.clearLatest());
     }
 
     eventSource.makeFirst(event_types.IMPERSONATE_READY, async () => {

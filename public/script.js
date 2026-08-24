@@ -795,7 +795,7 @@ async function firstLoadInit() {
         initMacroAutoComplete();
         initWorldInfo();
         initHorde();
-        initRossMods();
+        await initRossMods();
         initStats();
         initCfg();
         initLogprobs();
@@ -3489,10 +3489,17 @@ function cleanGroupMessage(getMessage) {
                 continue;
             }
 
-            const regex = new RegExp(`(^|\n)${escapeRegex(name)}:`);
+            const regex = new RegExp(`(^|\\n)\\s*${escapeRegex(name)}\\s*[:：]`);
             const nameMatch = getMessage.match(regex);
             if (nameMatch) {
-                getMessage = getMessage.substring(0, nameMatch.index);
+                // If another character's name appears at position 0,
+                // the AI is writing for the wrong character entirely.
+                // Discard the whole message — it's not our character's reply.
+                if (nameMatch.index === 0) {
+                    getMessage = '';
+                } else {
+                    getMessage = getMessage.substring(0, nameMatch.index);
+                }
             }
         }
     }
