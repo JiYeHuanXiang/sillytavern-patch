@@ -151,6 +151,9 @@ export const extension_settings = {
         chara: [],
         wiAddition: [],
     },
+    caption: {
+        refine_mode: false,
+    },
     expressions: {
         /** @type {number} see `EXPRESSION_API` */
         api: undefined,
@@ -189,6 +192,7 @@ export const extension_settings = {
         character_negative_prompts: {},
     },
     chromadb: {},
+    translate: {},
     objective: {},
     quickReply: {},
     randomizer: {
@@ -215,6 +219,12 @@ export const extension_settings = {
      * @type {string[]}
      */
     disabled_attachments: [],
+    gallery: {
+        /** @type {{[characterKey: string]: string}} */
+        folders: {},
+        /** @type {string} */
+        sort: 'dateAsc',
+    },
 };
 
 function showHideExtensionsMenu() {

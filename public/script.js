@@ -6165,11 +6165,35 @@ export function triggerAutoContinue(messageChunk, isImpersonate) {
 // insert a visible user-side placeholder and let the character react to the silence.
 const TIME_PERCEPTION_MIN_TIMEOUT = 1;
 const TIME_PERCEPTION_MAX_TIMEOUT = 10;
+const TIME_PERCEPTION_MIN_ALLOWED = 0.1;
 let timePerceptionTimer = null;
 let timePerceptionDuration = null;
 let isRunningDurationQuery = false;
 let timePerceptionCycleId = 0;
 let timePerceptionDisplayInterval = null;
+
+const TIME_PERCEPTION_QUERY_PROMPT_DEFAULT = '（时间感知系统）你刚对{{user}}说完话，正在等待回应。系统会按你选择的等待时间，在{{user}}沉默后自动提醒你做出反应。请只回复 {min} 到 {max} 之间的数字（可含小数），表示你愿意等几分钟。只输出数字，不要其他文字或标点。';
+const TIME_PERCEPTION_CONTEXT_PROMPT_DEFAULT = '（时间感知系统）{{user}}已沉默{minutes}分钟未回应。请自然地对这份沉默做出反应,如 猜测{{user}}在做什么、或自行采取行动。';
+
+function getTimePerceptionMinTimeout() {
+    const v = Number(power_user.time_perception?.min_timeout);
+    return Number.isFinite(v) && v > 0 ? Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(TIME_PERCEPTION_MIN_ALLOWED, v)) : TIME_PERCEPTION_MIN_TIMEOUT;
+}
+
+function getTimePerceptionMaxTimeout() {
+    const v = Number(power_user.time_perception?.max_timeout);
+    return Number.isFinite(v) && v > 0 ? Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(getTimePerceptionMinTimeout(), v)) : TIME_PERCEPTION_MAX_TIMEOUT;
+}
+
+function getTimePerceptionQueryPrompt(min, max) {
+    const tpl = power_user.time_perception?.query_prompt || TIME_PERCEPTION_QUERY_PROMPT_DEFAULT;
+    return tpl.replace(/\{min\}/g, String(min)).replace(/\{max\}/g, String(max));
+}
+
+function getTimePerceptionContextPrompt(minutes) {
+    const tpl = power_user.time_perception?.context_prompt || TIME_PERCEPTION_CONTEXT_PROMPT_DEFAULT;
+    return tpl.replace(/\{minutes\}/g, String(minutes));
+}
 
 function shouldStartTimePerception() {
     if (!power_user.time_perception?.enabled) return false;
@@ -6226,14 +6250,16 @@ function stopTimePerceptionDisplay() {
 }
 
 async function queryTimePerceptionDuration() {
-    const queryPrompt = `（时间感知系统）你刚对{{user}}说完话，正在等待回应。系统会按你选择的等待时间，在{{user}}沉默后自动提醒你做出反应。请只回复 ${TIME_PERCEPTION_MIN_TIMEOUT} 到 ${TIME_PERCEPTION_MAX_TIMEOUT} 之间的整数，表示你愿意等几分钟。只输出数字，不要其他文字或标点。`;
+    const min = getTimePerceptionMinTimeout();
+    const max = getTimePerceptionMaxTimeout();
+    const queryPrompt = getTimePerceptionQueryPrompt(min, max);
     try {
         const answer = await generateQuietPrompt({ quietPrompt: queryPrompt, quietToLoud: false });
-        const match = String(answer).match(/\d+/);
+        const match = String(answer).match(/\d+(?:\.\d+)?/);
         if (match) {
-            const minutes = Math.floor(Number(match[0]));
+            const minutes = Number(match[0]);
             if (Number.isFinite(minutes)) {
-                return Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(TIME_PERCEPTION_MIN_TIMEOUT, minutes));
+                return Math.min(max, Math.max(min, minutes));
             }
         }
     } catch (error) {
@@ -6241,7 +6267,7 @@ async function queryTimePerceptionDuration() {
     }
     const fallback = Number(power_user.time_perception?.default_timeout);
     return Number.isFinite(fallback)
-        ? Math.min(TIME_PERCEPTION_MAX_TIMEOUT, Math.max(TIME_PERCEPTION_MIN_TIMEOUT, Math.floor(fallback)))
+        ? Math.min(max, Math.max(min, fallback))
         : 2;
 }
 
@@ -6286,7 +6312,7 @@ async function onTimePerceptionTimeout() {
         await sendMessageAsUser(placeholder);
         // Give the AI context about the silence so it reacts meaningfully instead of
         // treating the placeholder as an ordinary user message.
-        const contextPrompt = `（时间感知系统）{{user}}已沉默${minutes}分钟未回应。请自然地对这份沉默做出反应,如 猜测{{user}}在做什么、或自行采取行动。`;
+        const contextPrompt = getTimePerceptionContextPrompt(minutes);
         // automatic_trigger prevents Generate from reading/pushing the textarea again
         await Generate('normal', { automatic_trigger: true, quiet_prompt: contextPrompt });
     } catch (error) {

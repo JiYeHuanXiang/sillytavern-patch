@@ -133,6 +133,10 @@ export const power_user = {
         enabled: false,
         default_timeout: 2,
         placeholder: '(玩家未回应)',
+        min_timeout: 1,
+        max_timeout: 10,
+        query_prompt: '',
+        context_prompt: '',
     },
     markdown_escape_strings: '',
     chat_truncation: 100,
@@ -1709,6 +1713,10 @@ export async function loadPowerUserSettings(settings, data) {
     $('#time_perception_enabled').prop('checked', power_user.time_perception.enabled);
     $('#time_perception_default_timeout').val(power_user.time_perception.default_timeout);
     $('#time_perception_placeholder').val(power_user.time_perception.placeholder);
+    $('#time_perception_min_timeout').val(power_user.time_perception.min_timeout);
+    $('#time_perception_max_timeout').val(power_user.time_perception.max_timeout);
+    $('#time_perception_query_prompt').val(power_user.time_perception.query_prompt);
+    $('#time_perception_context_prompt').val(power_user.time_perception.context_prompt);
     $('#play_message_sound').prop('checked', power_user.play_message_sound);
     $('#play_sound_unfocused').prop('checked', power_user.play_sound_unfocused);
     $('#never_resize_avatars').prop('checked', power_user.never_resize_avatars);
@@ -3323,7 +3331,9 @@ jQuery(() => {
 
     $('#time_perception_default_timeout').on('input', function () {
         const val = Number($(this).val());
-        if (Number.isFinite(val) && val >= 1 && val <= 10) {
+        const min = Number(power_user.time_perception.min_timeout) || 0.1;
+        const max = Number(power_user.time_perception.max_timeout) || 10;
+        if (Number.isFinite(val) && val > 0 && val >= min && val <= max) {
             power_user.time_perception.default_timeout = val;
             saveSettingsDebounced();
         }
@@ -3331,6 +3341,34 @@ jQuery(() => {
 
     $('#time_perception_placeholder').on('input', function () {
         power_user.time_perception.placeholder = String($(this).val());
+        saveSettingsDebounced();
+    });
+
+    $('#time_perception_min_timeout').on('input', function () {
+        const val = Number($(this).val());
+        if (Number.isFinite(val) && val >= 0.1 && val <= 10) {
+            const max = Number(power_user.time_perception.max_timeout) || 10;
+            power_user.time_perception.min_timeout = Math.min(val, max);
+            saveSettingsDebounced();
+        }
+    });
+
+    $('#time_perception_max_timeout').on('input', function () {
+        const val = Number($(this).val());
+        if (Number.isFinite(val) && val >= 0.1 && val <= 10) {
+            const min = Number(power_user.time_perception.min_timeout) || 0.1;
+            power_user.time_perception.max_timeout = Math.max(val, min);
+            saveSettingsDebounced();
+        }
+    });
+
+    $('#time_perception_query_prompt').on('input', function () {
+        power_user.time_perception.query_prompt = String($(this).val());
+        saveSettingsDebounced();
+    });
+
+    $('#time_perception_context_prompt').on('input', function () {
+        power_user.time_perception.context_prompt = String($(this).val());
         saveSettingsDebounced();
     });
 

@@ -3889,17 +3889,24 @@
                             </select>
                         </div>
                         <div id="pollinations_form" data-source="pollinations">
-                            <h4>
-                                <a href="https://enter.pollinations.ai/" target="_blank" rel="noopener noreferrer" data-i18n="Pollinations API Key">
-                                    Pollinations API Key
-                                </a>
-                            </h4>
-                            <div class="flex-container">
-                                <input id="api_key_pollinations" name="api_key_pollinations" class="text_pole flex1" value="" type="text" autocomplete="off">
-                                <div title="Manage API keys" data-i18n="[title]Manage API keys" class="menu_button fa-solid fa-key fa-fw manage-api-keys" data-key="api_key_pollinations"></div>
-                            </div>
-                            <div data-for="api_key_pollinations" class="neutral_warning" data-i18n="For privacy reasons, your API key will be hidden after you click 'Connect'.">
-                                For privacy reasons, your API key will be hidden after you click 'Connect'.
+                            <h4 data-i18n="Pollinations Endpoint">Pollinations Endpoint</h4>
+                            <select id="pollinations_endpoint">
+                                <option value="anonymous" data-i18n="Anonymous (No Key)">Anonymous (No Key)</option>
+                                <option value="authenticated" data-i18n="Authenticated (API Key)">Authenticated (API Key)</option>
+                            </select>
+                            <div id="pollinations_key_section">
+                                <h4>
+                                    <a href="https://enter.pollinations.ai/" target="_blank" rel="noopener noreferrer" data-i18n="Pollinations API Key">
+                                        Pollinations API Key
+                                    </a>
+                                </h4>
+                                <div class="flex-container">
+                                    <input id="api_key_pollinations" name="api_key_pollinations" class="text_pole flex1" value="" type="text" autocomplete="off">
+                                    <div title="Manage API keys" data-i18n="[title]Manage API keys" class="menu_button fa-solid fa-key fa-fw manage-api-keys" data-key="api_key_pollinations"></div>
+                                </div>
+                                <div data-for="api_key_pollinations" class="neutral_warning" data-i18n="For privacy reasons, your API key will be hidden after you click 'Connect'.">
+                                    For privacy reasons, your API key will be hidden after you click 'Connect'.
+                                </div>
                             </div>
                             <h4 data-i18n="Pollinations Model">Pollinations Model</h4>
                             <select id="model_pollinations_select">
@@ -5234,18 +5241,38 @@
 
                         <div name="TimePerceptionToggles">
                             <h4><span data-i18n="Time Perception">Time Perception</span></h4>
-                            <label class="checkbox_label" for="time_perception_enabled" title="After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to 1-10 minutes." data-i18n="[title]After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to 1-10 minutes.">
+                            <label class="checkbox_label" for="time_perception_enabled" title="After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to the configured min/max range." data-i18n="[title]After the AI replies, wait for the player's response. On timeout the AI continues reacting to the player's silence. The wait duration is chosen by the AI, clamped to the configured min/max range.">
                                 <input id="time_perception_enabled" type="checkbox" />
                                 <small data-i18n="Enable Time Perception">Enable Time Perception</small>
                             </label>
                             <div class="time_perception_settings_block">
                                 <label for="time_perception_default_timeout">
                                     <small data-i18n="Default Wait (min)">Default Wait (min)</small>
-                                    <input id="time_perception_default_timeout" type="number" class="text_pole textarea_compact" min="1" max="10" />
+                                    <input id="time_perception_default_timeout" type="number" class="text_pole textarea_compact" min="0.1" max="10" step="0.1" />
                                 </label>
                                 <label for="time_perception_placeholder">
                                     <small data-i18n="No-Response Placeholder">No-Response Placeholder</small>
                                     <input id="time_perception_placeholder" type="text" class="text_pole textarea_compact" />
+                                </label>
+                                <div class="flex-container flexGap2">
+                                    <label class="flex1">
+                                        <small data-i18n="Min Wait (min)">Min Wait (min)</small>
+                                        <input id="time_perception_min_timeout" type="number" class="text_pole textarea_compact" min="0.1" max="10" step="0.1" />
+                                    </label>
+                                    <label class="flex1">
+                                        <small data-i18n="Max Wait (min)">Max Wait (min)</small>
+                                        <input id="time_perception_max_timeout" type="number" class="text_pole textarea_compact" min="0.1" max="10" step="0.1" />
+                                    </label>
+                                </div>
+                                <label for="time_perception_query_prompt">
+                                    <small data-i18n="Duration Query Prompt">Duration Query Prompt</small>
+                                    <small data-i18n="Leave empty for default. Use {min} and {max} for the wait range." style="opacity:0.7;display:block;">Leave empty for default. Use {min} and {max} for the wait range.</small>
+                                    <textarea id="time_perception_query_prompt" class="text_pole textarea_compact" rows="3" placeholder="（时间感知系统）你刚对{{user}}说完话…请只回复 {min} 到 {max} 之间的整数…"></textarea>
+                                </label>
+                                <label for="time_perception_context_prompt">
+                                    <small data-i18n="Silence Reaction Prompt">Silence Reaction Prompt</small>
+                                    <small data-i18n="Leave empty for default. Use {minutes} for how long the player was silent." style="opacity:0.7;display:block;">Leave empty for default. Use {minutes} for how long the player was silent.</small>
+                                    <textarea id="time_perception_context_prompt" class="text_pole textarea_compact" rows="3" placeholder="（时间感知系统）{{user}}已沉默{minutes}分钟未回应…"></textarea>
                                 </label>
                             </div>
                         </div>
@@ -5830,6 +5857,8 @@
                         <div id="websearch_container" class="extension_container"></div>
                         <div id="emulatorjs_container" class="extension_container"></div>
                         <div id="qr_container" class="extension_container"></div>
+                        <div id="translation_container" class="extension_container"></div>
+                        <div id="caption_container" class="extension_container"></div>
                         <div id="idle_container" class="extension_container"></div>
                         <div id="summarize_container" class="extension_container"></div>
                         <div id="hypebot_container" class="extension_container"></div>
@@ -7458,6 +7487,7 @@
                         <div class="mes_buttons">
                             <div title="Message Actions" class="mes_button extraMesButtonsHint fa-solid fa-ellipsis" data-i18n="[title]Message Actions"></div>
                             <div class="extraMesButtons">
+                                <div title="Translate message" class="mes_button mes_translate fa-solid fa-language" data-i18n="[title]Translate message"></div>
                                 <div title="Generate Image" class="mes_button sd_message_gen fa-solid fa-paintbrush" data-i18n="[title]Generate Image"></div>
                                 <div title="Narrate" class="mes_button mes_narrate fa-solid fa-bullhorn" data-i18n="[title]Narrate"></div>
                                 <div title="Prompt" class="mes_button mes_prompt fa-solid fa-square-poll-horizontal " data-i18n="[title]Prompt" style="display: none;"></div>
@@ -7730,6 +7760,7 @@
             <div class="mes_media_container mes_img_container">
                 <div class="mes_img_controls">
                     <div title="Expand and zoom" class="right_menu_button fa-lg fa-solid fa-magnifying-glass mes_media_enlarge" data-i18n="[title]Expand and zoom"></div>
+                    <div title="Caption" class="right_menu_button fa-lg fa-solid fa-envelope-open-text mes_img_caption" data-i18n="[title]Caption"></div>
                     <div title="Delete" class="right_menu_button fa-lg fa-solid fa-trash-can mes_media_delete" data-i18n="[title]Delete"></div>
                 </div>
                 <img class="mes_img" src="" />
@@ -7740,6 +7771,7 @@
             <div class="mes_media_container mes_video_container">
                 <div class="mes_video_controls">
                     <div title="Expand and zoom" class="right_menu_button fa-lg fa-solid fa-magnifying-glass mes_media_enlarge" data-i18n="[title]Expand and zoom"></div>
+                    <div title="Caption" class="right_menu_button fa-lg fa-solid fa-envelope-open-text mes_img_caption" data-i18n="[title]Caption"></div>
                     <div title="Delete" class="right_menu_button fa-lg fa-solid fa-trash-can mes_media_delete" data-i18n="[title]Delete"></div>
                 </div>
                 <video class="mes_video" controls preload="metadata"></video>
