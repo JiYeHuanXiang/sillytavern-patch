@@ -2141,19 +2141,138 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
 }
 
 /**
+ * Maps model name prefixes to icon file basenames in /img/.
+ * Keys are matched as case-insensitive prefixes against the model name.
+ * When a prefix matches, the mapped basename is tried (.png then .svg) before
+ * falling back to the provider icon.
+ * @type {Record<string, string>}
+ */
+const MODEL_ICON_MAP = {
+    'glm-5.3': 'glm-5.3',
+    'glm-5.2': 'glm-5.2',
+    'glm-5.1': 'glm-5.1',
+    'glm-5-turbo': 'glm-5-turbo',
+    'glm-5v-turbo': 'glm-5v-turbo',
+    'glm-5': 'glm-5',
+    'glm-4.7': 'glm-4.7',
+    'glm-4.6': 'glm-4.6',
+    'glm-4.5': 'glm-4.5',
+    'glm-4': 'glm-4',
+    'claude-opus': 'claude-opus',
+    'claude-sonnet': 'claude-sonnet',
+    'claude-haiku': 'claude-haiku',
+    'claude-fable': 'claude-fable',
+    'claude-3': 'claude-3',
+    'gpt-5.6': 'gpt-5.6',
+    'gpt-5.5': 'gpt-5.5',
+    'gpt-5.4': 'gpt-5.4',
+    'gpt-5.3': 'gpt-5.3',
+    'gpt-5.2': 'gpt-5.2',
+    'gpt-5': 'gpt-5',
+    'gpt-4o': 'gpt-4o',
+    'gpt-4': 'gpt-4',
+    'gpt-3': 'gpt-3',
+    'o1': 'o1',
+    'o3': 'o3',
+    'o4': 'o4',
+    'deepseek-v4': 'deepseek-v4',
+    'deepseek-v3': 'deepseek-v3',
+    'deepseek-r1': 'deepseek-r1',
+    'deepseek-chat': 'deepseek-chat',
+    'deepseek': 'deepseek',
+    'MiniMax-M3': 'minimax-m3',
+    'MiniMax-M2': 'minimax-m2',
+    'M2-her': 'minimax-her',
+    'grok-4': 'grok-4',
+    'grok-3': 'grok-3',
+    'grok-2': 'grok-2',
+    'mistral-large': 'mistral-large',
+    'mistral-medium': 'mistral-medium',
+    'mistral-small': 'mistral-small',
+    'gemini-3': 'gemini-3',
+    'gemini-2.5': 'gemini-2.5',
+    'gemini-2.0': 'gemini-2.0',
+    'gemini': 'gemini',
+    'gemma-4': 'gemma-4',
+    'kimi-k2': 'kimi-k2',
+    'kimi': 'kimi',
+};
+
+/**
+ * Resolves the ordered list of candidate icon paths for a given API/model pair.
+ * Priority: (1) MODEL_ICON_MAP prefix match, (2) sanitized model name, (3) provider fallback.
+ * Each candidate yields a .png then .svg attempt, except the provider fallback which is .svg only.
+ * @param {string} apiName API identifier (provider, e.g. 'zai', 'claude')
+ * @param {string} modelName Model name (e.g. 'glm-5.3-flash')
+ * @returns {string[]} Ordered candidate paths, last is always the provider fallback
+ */
+function resolveIconCandidates(apiName, modelName) {
+    const candidates = [];
+    const lowerModel = (modelName || '').toLowerCase();
+
+    // (1) Mapping table — longest-prefix-first so 'glm-5.3' beats 'glm-5'
+    const mapKeys = Object.keys(MODEL_ICON_MAP)
+        .filter(k => lowerModel.startsWith(k.toLowerCase()))
+        .sort((a, b) => b.length - a.length);
+
+    for (const key of mapKeys) {
+        const base = MODEL_ICON_MAP[key];
+        candidates.push(`/img/${base}.png`, `/img/${base}.svg`);
+    }
+
+    // (2) Sanitized model name (strip vendor path prefixes like 'deepseek-ai/')
+    if (modelName) {
+        const sanitized = modelName
+            .replace(/^[^/]+\//, '')      // strip 'vendor/' prefix
+            .replace(/[^a-zA-Z0-9._-]/g, '-')
+            .replace(/-+/g, '-');
+        if (sanitized && !mapKeys.length) {
+            candidates.push(`/img/${sanitized}.png`, `/img/${sanitized}.svg`);
+        }
+    }
+
+    // (3) Provider fallback (always last, always svg)
+    candidates.push(`/img/${apiName}.svg`);
+    return candidates;
+}
+
+/**
  * Creates an Image element for the given API/model icon.
- * The image references the matching SVG file from `/img/` and includes a tooltip with API and model info.
+ * Tries model-specific icons first (png or svg), falling back to the provider svg.
  * The caller is responsible for appending the image to the DOM and optionally calling `SVGInject` on it.
  *
+ * A throwaway probe Image sequentially tries each candidate; once one loads it is
+ * assigned as the returned image's src so the caller's onload fires exactly once.
+ * If every candidate fails to load the last one (provider fallback) is assigned
+ * anyway so a valid-ish src is always present.
+ *
  * @param {string} apiName - API identifier matching an SVG file in /img/ (e.g. 'openai', 'openrouter', 'claude')
- * @param {string} [modelName=''] - Model name shown in the tooltip
- * @returns {HTMLImageElement} The image element (not yet in the DOM)
+ * @param {string} [modelName=''] - Model name used to resolve a specific icon
+ * @returns {HTMLImageElement} The image element (not yet in the DOM, src set asynchronously)
  */
 export function createModelIcon(apiName, modelName = '') {
     const image = new Image();
     image.classList.add('icon-svg');
-    image.src = `/img/${apiName}.svg`;
     image.title = modelName ? `${apiName} - ${modelName}` : apiName;
+
+    const candidates = resolveIconCandidates(apiName, modelName);
+
+    const probe = new Image();
+    let index = 0;
+    const probeNext = () => {
+        if (index >= candidates.length) {
+            // All candidates failed — assign the provider fallback so the
+            // caller's onload still fires (with the provider icon).
+            image.src = candidates[candidates.length - 1];
+            return;
+        }
+        const src = candidates[index++];
+        probe.onload = () => { image.src = src; };
+        probe.onerror = probeNext;
+        probe.src = src;
+    };
+
+    probeNext();
     return image;
 }
 
