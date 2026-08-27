@@ -83,6 +83,7 @@ const API_CHUTES = 'https://llm.chutes.ai/v1';
 const API_ELECTRONHUB = 'https://api.electronhub.ai/v1';
 const API_NANOGPT = 'https://nano-gpt.com/api/v1';
 const API_DEEPSEEK = 'https://api.deepseek.com/beta';
+const API_OPENCODEGO = 'https://opencode.ai/zen/go/v1';
 const API_XAI = 'https://api.x.ai/v1';
 const API_AIMLAPI = 'https://api.aimlapi.com/v1';
 const API_POLLINATIONS = 'https://gen.pollinations.ai/v1';
@@ -90,14 +91,18 @@ const API_POLLINATIONS_ANON = 'https://text.pollinations.ai/v1';
 const API_MOONSHOT = 'https://api.moonshot.ai/v1';
 const API_FIREWORKS = 'https://api.fireworks.ai/inference/v1';
 const API_COMETAPI = 'https://api.cometapi.com/v1';
+const API_INFERSIA = 'https://api.infersia.com/v1';
 const API_ZAI_COMMON = 'https://api.z.ai/api/paas/v4';
 const API_ZAI_CODING = 'https://api.z.ai/api/coding/paas/v4';
 const API_SILICONFLOW = 'https://api.siliconflow.com/v1';
 const API_SILICONFLOW_CN = 'https://api.siliconflow.cn/v1';
 const API_MINIMAX = 'https://api.minimax.io/v1';
 const API_MINIMAX_CN = 'https://api.minimaxi.com/v1';
+const API_MINIMAX_ANTHROPIC = 'https://api.minimax.io/anthropic';
+const API_MINIMAX_ANTHROPIC_CN = 'https://api.minimaxi.com/anthropic';
 const API_OPENROUTER = 'https://openrouter.ai/api/v1';
 const API_WORKERS_AI = 'https://api.cloudflare.com/client/v4/accounts';
+const API_CONCENTRATE = 'https://api.concentrate.ai/v1';
 
 /**
  * Module-scoped Claude caching configuration values.
@@ -1179,6 +1184,118 @@ async function sendDeepSeekRequest(request, response) {
 }
 
 /**
+ * Sends a request to OpenCode Go API.
+ * @param {express.Request} request Express request
+ * @param {express.Response} response Express response
+ */
+async function sendOpenCodeGoRequest(request, response) {
+    const apiUrl = new URL(request.body.reverse_proxy || API_OPENCODEGO).toString();
+    const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.OPENCODEGO, request.body.secret_id);
+
+    if (!apiKey && !request.body.reverse_proxy) {
+        console.warn('OpenCode Go API key is missing.');
+        return response.status(400).send({ error: true });
+    }
+
+    const controller = new AbortController();
+    request.socket.removeAllListeners('close');
+    request.socket.on('close', function () {
+        controller.abort();
+    });
+
+    try {
+        let bodyParams = {};
+
+        if (request.body.logprobs > 0) {
+            bodyParams['top_logprobs'] = request.body.logprobs;
+            bodyParams['logprobs'] = true;
+        }
+
+        if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
+            bodyParams['tools'] = request.body.tools;
+            bodyParams['tool_choice'] = request.body.tool_choice;
+
+            // OpenAI-compatible APIs don't permit empty required arrays
+            bodyParams.tools.forEach(tool => {
+                const required = tool?.function?.parameters?.required;
+                if (Array.isArray(required) && required.length === 0) {
+                    delete tool.function.parameters.required;
+                }
+            });
+        }
+
+        // Hack to support JSON schema
+        if (request.body.json_schema) {
+            bodyParams.response_format = {
+                type: 'json_schema',
+                json_schema: {
+                    name: request.body.json_schema.name,
+                    strict: request.body.json_schema.strict ?? true,
+                    schema: request.body.json_schema.value,
+                },
+            };
+        }
+
+        // OpenCode Go models enable reasoning via the reasoning_effort parameter
+        if (request.body.include_reasoning && request.body.reasoning_effort) {
+            bodyParams['reasoning_effort'] = request.body.reasoning_effort;
+        }
+
+        const requestBody = {
+            'messages': request.body.messages,
+            'model': request.body.model,
+            'temperature': request.body.temperature,
+            'max_tokens': request.body.max_tokens,
+            'max_completion_tokens': request.body.max_completion_tokens,
+            'stream': request.body.stream,
+            'presence_penalty': request.body.presence_penalty,
+            'frequency_penalty': request.body.frequency_penalty,
+            'top_p': request.body.top_p,
+            'top_k': request.body.top_k,
+            'stop': request.body.stop,
+            'seed': request.body.seed,
+            'n': request.body.n,
+            ...bodyParams,
+        };
+
+        const config = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + apiKey,
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+        };
+
+        console.debug('OpenCode Go request:', requestBody);
+
+        const generateResponse = await fetch(apiUrl + '/chat/completions', config);
+
+        if (request.body.stream) {
+            await forwardFetchResponse(generateResponse, response);
+        } else {
+            if (!generateResponse.ok) {
+                const errorText = await generateResponse.text();
+                console.warn(`OpenCode Go API returned error: ${generateResponse.status} ${generateResponse.statusText} ${errorText}`);
+                const errorJson = tryParse(errorText) ?? { error: true };
+                return response.status(500).send(errorJson);
+            }
+            const generateResponseJson = await generateResponse.json();
+            console.debug('OpenCode Go response:', generateResponseJson);
+            return response.send(generateResponseJson);
+        }
+    } catch (error) {
+        console.error('Error communicating with OpenCode Go API: ', error);
+        if (!response.headersSent) {
+            response.send({ error: true });
+        } else {
+            response.end();
+        }
+    }
+}
+
+/**
  * Sends a request to XAI API.
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
@@ -1608,9 +1725,12 @@ async function sendChutesRequest(request, response) {
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
  */
-async function sendMinimaxRequest(request, response) {
-    const apiUrl = request.body.minimax_endpoint === MINIMAX_ENDPOINT.CN
-        ? API_MINIMAX_CN : API_MINIMAX;
+export async function sendMinimaxRequest(request, response) {
+    const isAnthropic = [MINIMAX_ENDPOINT.GLOBAL_ANTHROPIC, MINIMAX_ENDPOINT.CN_ANTHROPIC].includes(request.body.minimax_endpoint);
+    const isChina = [MINIMAX_ENDPOINT.CN, MINIMAX_ENDPOINT.CN_ANTHROPIC].includes(request.body.minimax_endpoint);
+    const apiUrl = isAnthropic
+        ? (isChina ? API_MINIMAX_ANTHROPIC_CN : API_MINIMAX_ANTHROPIC)
+        : (isChina ? API_MINIMAX_CN : API_MINIMAX);
     const apiKey = readSecret(request.user.directories, SECRET_KEYS.MINIMAX, request.body.secret_id);
 
     if (!apiKey) {
@@ -1625,11 +1745,75 @@ async function sendMinimaxRequest(request, response) {
     });
 
     try {
+        if (isAnthropic) {
+            const useTools = Array.isArray(request.body.tools) && request.body.tools.length > 0;
+            const convertedPrompt = convertClaudeMessages(structuredClone(request.body.messages), '', true, useTools, getPromptNames(request), { video: true });
+            const bodyParams = {};
+
+            if (request.body.model === 'MiniMax-M3') {
+                bodyParams['thinking'] = { type: request.body.include_reasoning ? 'adaptive' : 'disabled' };
+            }
+
+            if (useTools) {
+                bodyParams['tools'] = request.body.tools
+                    .filter(tool => tool.type === 'function')
+                    .map(tool => tool.function)
+                    .map(fn => ({ name: fn.name, description: fn.description, input_schema: flattenSchema(fn.parameters, request.body.chat_completion_source) }));
+                bodyParams['tool_choice'] = { type: request.body.tool_choice };
+            }
+
+            const requestBody = {
+                'messages': convertedPrompt.messages,
+                'model': request.body.model,
+                'max_tokens': request.body.max_tokens,
+                'stream': request.body.stream,
+                'temperature': request.body.temperature,
+                'top_p': request.body.top_p,
+                ...bodyParams,
+            };
+
+            if (convertedPrompt.systemPrompt.length > 0) {
+                requestBody['system'] = convertedPrompt.systemPrompt;
+            }
+
+            const generateResponse = await fetch(apiUrl + '/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'anthropic-version': '2023-06-01',
+                    'x-api-key': apiKey,
+                },
+                body: JSON.stringify(requestBody),
+                signal: combineAbortSignals(controller.signal, REQUEST_TIMEOUT_MS),
+            });
+
+            if (request.body.stream) {
+                return await forwardFetchResponse(generateResponse, response);
+            }
+
+            if (!generateResponse.ok) {
+                const errorText = await generateResponse.text();
+                console.warn('MiniMax returned error: ', errorText);
+                const errorJson = tryParse(errorText) ?? { error: true };
+                return response.status(500).send(errorJson);
+            }
+
+            const generateResponseJson = await generateResponse.json();
+            const responseText = generateResponseJson?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n\n') || '';
+            const reply = { choices: [{ index: 0, message: { content: responseText } }], content: generateResponseJson.content };
+            return response.send(reply);
+        }
+
         // MiniMax does not allow consecutive messages with the same role.
         // Merge them into a single message to avoid "invalid chat setting (2013)".
         const messages = postProcessPrompt(request.body.messages, PROMPT_PROCESSING_TYPE.MERGE_TOOLS, getPromptNames(request));
 
         let bodyParams = {};
+
+        if (request.body.model === 'MiniMax-M3') {
+            bodyParams['thinking'] = { type: request.body.include_reasoning ? 'adaptive' : 'disabled' };
+            bodyParams['reasoning_split'] = true;
+        }
 
         if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
             bodyParams['tools'] = request.body.tools;
@@ -1828,6 +2012,10 @@ router.post('/status', async function (request, statusResponse) {
             apiUrl = new URL(request.body.reverse_proxy || API_DEEPSEEK.replace('/beta', '')).toString();
             apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.DEEPSEEK, request.body.secret_id);
             headers = {};
+        } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.OPENCODEGO) {
+            apiUrl = new URL(request.body.reverse_proxy || API_OPENCODEGO).toString();
+            apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.OPENCODEGO, request.body.secret_id);
+            headers = {};
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.XAI) {
             apiUrl = new URL(request.body.reverse_proxy || API_XAI).toString();
             apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.XAI, request.body.secret_id);
@@ -1836,6 +2024,10 @@ router.post('/status', async function (request, statusResponse) {
             apiUrl = API_AIMLAPI;
             apiKey = readSecret(request.user.directories, SECRET_KEYS.AIMLAPI, request.body.secret_id);
             headers = { ...AIMLAPI_HEADERS };
+        } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CONCENTRATE) {
+            apiUrl = API_CONCENTRATE;
+            apiKey = readSecret(request.user.directories, SECRET_KEYS.CONCENTRATE, request.body.secret_id);
+            headers = {};
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.POLLINATIONS) {
             const isAnonymous = request.body.pollinations_endpoint === POLLINATIONS_ENDPOINT.ANONYMOUS;
             apiUrl = 'https://gen.pollinations.ai/text';
@@ -1857,6 +2049,10 @@ router.post('/status', async function (request, statusResponse) {
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.FIREWORKS) {
             apiUrl = API_FIREWORKS;
             apiKey = readSecret(request.user.directories, SECRET_KEYS.FIREWORKS, request.body.secret_id);
+            headers = {};
+        } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.INFERSIA) {
+            apiUrl = API_INFERSIA;
+            apiKey = readSecret(request.user.directories, SECRET_KEYS.INFERSIA, request.body.secret_id);
             headers = {};
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
             apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.MAKERSUITE, request.body.secret_id);
@@ -2252,6 +2448,7 @@ router.post('/generate', async function (request, response) {
             case CHAT_COMPLETION_SOURCES.MISTRALAI: return await sendMistralAIRequest(request, response);
             case CHAT_COMPLETION_SOURCES.COHERE: return await sendCohereRequest(request, response);
             case CHAT_COMPLETION_SOURCES.DEEPSEEK: return await sendDeepSeekRequest(request, response);
+            case CHAT_COMPLETION_SOURCES.OPENCODEGO: return await sendOpenCodeGoRequest(request, response);
             case CHAT_COMPLETION_SOURCES.AIMLAPI: return await sendAimlapiRequest(request, response);
             case CHAT_COMPLETION_SOURCES.XAI: return await sendXaiRequest(request, response);
             case CHAT_COMPLETION_SOURCES.CHUTES: return await sendChutesRequest(request, response);
@@ -2464,9 +2661,32 @@ router.post('/generate', async function (request, response) {
                     },
                 };
             }
+        } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CONCENTRATE) {
+            apiUrl = API_CONCENTRATE;
+            apiKey = readSecret(request.user.directories, SECRET_KEYS.CONCENTRATE, request.body.secret_id);
+            headers = {};
+            bodyParams = {};
+            if (request.body.reasoning_effort) {
+                bodyParams['reasoning_effort'] = request.body.reasoning_effort;
+            }
+            if (request.body.json_schema) {
+                bodyParams['response_format'] = {
+                    type: 'json_schema',
+                    json_schema: {
+                        name: request.body.json_schema.name,
+                        description: request.body.json_schema.description,
+                        schema: request.body.json_schema.value,
+                        strict: request.body.json_schema.strict ?? true,
+                    },
+                };
+            }
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.FIREWORKS) {
             apiUrl = API_FIREWORKS;
             apiKey = readSecret(request.user.directories, SECRET_KEYS.FIREWORKS, request.body.secret_id);
+            headers = {};
+        } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.INFERSIA) {
+            apiUrl = API_INFERSIA;
+            apiKey = readSecret(request.user.directories, SECRET_KEYS.INFERSIA, request.body.secret_id);
             headers = {};
             bodyParams = {};
             if (request.body.json_schema) {

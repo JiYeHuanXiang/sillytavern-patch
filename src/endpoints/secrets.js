@@ -53,6 +53,7 @@ export const SECRET_KEYS = {
     FALAI: 'api_key_falai',
     GENERIC: 'api_key_generic',
     DEEPSEEK: 'api_key_deepseek',
+    OPENCODEGO: 'api_key_opencodego',
     SERPER: 'api_key_serper',
     AIMLAPI: 'api_key_aimlapi',
     XAI: 'api_key_xai',
@@ -65,11 +66,13 @@ export const SECRET_KEYS = {
     AZURE_OPENAI: 'api_key_azure_openai',
     ZAI: 'api_key_zai',
     SILICONFLOW: 'api_key_siliconflow',
+    INFERSIA: 'api_key_infersia',
     ELEVENLABS: 'api_key_elevenlabs',
     POLLINATIONS: 'api_key_pollinations',
     VOLCENGINE_APP_ID: 'volcengine_app_id',
     VOLCENGINE_ACCESS_KEY: 'volcengine_access_key',
     WORKERS_AI: 'api_key_workers_ai',
+    CONCENTRATE: 'api_key_concentrate',
 };
 
 /**

@@ -62,6 +62,7 @@ export const SECRET_KEYS = {
     COMFY_RUNPOD: 'api_key_comfy_runpod',
     GENERIC: 'api_key_generic',
     DEEPSEEK: 'api_key_deepseek',
+    OPENCODEGO: 'api_key_opencodego',
     SERPER: 'api_key_serper',
     AIMLAPI: 'api_key_aimlapi',
     FALAI: 'api_key_falai',
@@ -74,11 +75,13 @@ export const SECRET_KEYS = {
     COMETAPI: 'api_key_cometapi',
     ZAI: 'api_key_zai',
     SILICONFLOW: 'api_key_siliconflow',
+    INFERSIA: 'api_key_infersia',
     ELEVENLABS: 'api_key_elevenlabs',
     POLLINATIONS: 'api_key_pollinations',
     VOLCENGINE_APP_ID: 'volcengine_app_id',
     VOLCENGINE_ACCESS_KEY: 'volcengine_access_key',
     WORKERS_AI: 'api_key_workers_ai',
+    CONCENTRATE: 'api_key_concentrate',
 };
 
 const FRIENDLY_NAMES = {
@@ -113,6 +116,7 @@ const FRIENDLY_NAMES = {
     [SECRET_KEYS.NANOGPT]: 'NanoGPT',
     [SECRET_KEYS.GENERIC]: 'Generic (OpenAI-compatible)',
     [SECRET_KEYS.DEEPSEEK]: 'DeepSeek',
+    [SECRET_KEYS.OPENCODEGO]: 'OpenCode Go',
     [SECRET_KEYS.XAI]: 'xAI (Grok)',
     [SECRET_KEYS.VERTEXAI_SERVICE_ACCOUNT]: 'Google Vertex AI (Service Account)',
     [SECRET_KEYS.STABILITY]: 'Stability AI',
@@ -139,11 +143,13 @@ const FRIENDLY_NAMES = {
     [SECRET_KEYS.AZURE_OPENAI]: 'Azure OpenAI',
     [SECRET_KEYS.ZAI]: 'Z.AI',
     [SECRET_KEYS.SILICONFLOW]: 'SiliconFlow',
+    [SECRET_KEYS.INFERSIA]: 'Infersia',
     [SECRET_KEYS.ELEVENLABS]: 'ElevenLabs TTS',
     [SECRET_KEYS.POLLINATIONS]: 'Pollinations',
     [SECRET_KEYS.VOLCENGINE_APP_ID]: 'Volcengine App ID',
     [SECRET_KEYS.VOLCENGINE_ACCESS_KEY]: 'Volcengine Access Key',
     [SECRET_KEYS.WORKERS_AI]: 'Cloudflare Workers AI',
+    [SECRET_KEYS.CONCENTRATE]: 'Concentrate',
 };
 
 const INPUT_MAP = {
@@ -177,6 +183,7 @@ const INPUT_MAP = {
     [SECRET_KEYS.NANOGPT]: '#api_key_nanogpt',
     [SECRET_KEYS.GENERIC]: '#api_key_generic',
     [SECRET_KEYS.DEEPSEEK]: '#api_key_deepseek',
+    [SECRET_KEYS.OPENCODEGO]: '#api_key_opencodego',
     [SECRET_KEYS.AIMLAPI]: '#api_key_aimlapi',
     [SECRET_KEYS.XAI]: '#api_key_xai',
     [SECRET_KEYS.VERTEXAI_SERVICE_ACCOUNT]: '#vertexai_service_account_json',
@@ -186,9 +193,11 @@ const INPUT_MAP = {
     [SECRET_KEYS.AZURE_OPENAI]: '#api_key_azure_openai',
     [SECRET_KEYS.ZAI]: '#api_key_zai',
     [SECRET_KEYS.SILICONFLOW]: '#api_key_siliconflow',
+    [SECRET_KEYS.INFERSIA]: '#api_key_infersia',
     [SECRET_KEYS.MINIMAX]: '#api_key_minimax',
     [SECRET_KEYS.POLLINATIONS]: '#api_key_pollinations',
     [SECRET_KEYS.WORKERS_AI]: '#api_key_workers_ai',
+    [SECRET_KEYS.CONCENTRATE]: '#api_key_concentrate',
 };
 
 const getLabel = () => moment().format('L LT');

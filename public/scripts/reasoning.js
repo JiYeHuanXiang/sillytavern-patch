@@ -4,7 +4,7 @@ import {
 import { chat, closeMessageEditor, event_types, eventSource, main_api, messageFormatting, saveChatConditional, saveChatDebounced, saveSettingsDebounced, substituteParams, syncMesToSwipe, updateMessageBlock } from '../script.js';
 import { getCurrentLocale, t, translate } from './i18n.js';
 import { macros, MacroCategory } from './macros/macro-system.js';
-import { chat_completion_sources, getChatCompletionModel, oai_settings } from './openai.js';
+import { chat_completion_sources, getChatCompletionModel, isMinimaxAnthropicEndpoint, oai_settings } from './openai.js';
 import { Popup } from './popup.js';
 import { performFuzzySearch, power_user } from './power-user.js';
 import { getPresetManager } from './preset-manager.js';
@@ -130,6 +130,8 @@ export function extractReasoningFromData(data, {
             switch (chatCompletionSource ?? oai_settings.chat_completion_source) {
                 case chat_completion_sources.DEEPSEEK:
                     return data?.choices?.[0]?.message?.reasoning_content ?? '';
+                case chat_completion_sources.OPENCODEGO:
+                    return data?.choices?.[0]?.message?.reasoning_content ?? '';
                 case chat_completion_sources.XAI:
                     return data?.choices?.[0]?.message?.reasoning_content ?? '';
                 case chat_completion_sources.OPENROUTER:
@@ -143,15 +145,21 @@ export function extractReasoningFromData(data, {
                 }
                 case chat_completion_sources.CLAUDE:
                     return data?.content?.filter(part => part.type === 'thinking')?.map(part => part.thinking)?.join('\n\n') ?? '';
+                case chat_completion_sources.MINIMAX:
+                    return isMinimaxAnthropicEndpoint(oai_settings.minimax_endpoint)
+                        ? data?.content?.filter(part => part.type === 'thinking')?.map(part => part.thinking)?.join('\n\n') ?? ''
+                        : data?.choices?.[0]?.message?.reasoning_content ?? '';
                 case chat_completion_sources.MISTRALAI:
                     return data?.choices?.[0]?.message?.content?.[0]?.thinking?.map(part => part.text)?.filter(x => x)?.join('\n\n') ?? '';
                 case chat_completion_sources.AIMLAPI:
+                case chat_completion_sources.CONCENTRATE:
                 case chat_completion_sources.POLLINATIONS:
                 case chat_completion_sources.MOONSHOT:
                 case chat_completion_sources.COMETAPI:
                 case chat_completion_sources.CHUTES:
                 case chat_completion_sources.ELECTRONHUB:
                 case chat_completion_sources.NANOGPT:
+                case chat_completion_sources.INFERSIA:
                 case chat_completion_sources.SILICONFLOW:
                 case chat_completion_sources.ZAI:
                 case chat_completion_sources.WORKERS_AI:

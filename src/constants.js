@@ -200,6 +200,7 @@ export const CHAT_COMPLETION_SOURCES = {
     ELECTRONHUB: 'electronhub',
     NANOGPT: 'nanogpt',
     DEEPSEEK: 'deepseek',
+    OPENCODEGO: 'opencodego',
     AIMLAPI: 'aimlapi',
     XAI: 'xai',
     POLLINATIONS: 'pollinations',
@@ -211,6 +212,8 @@ export const CHAT_COMPLETION_SOURCES = {
     SILICONFLOW: 'siliconflow',
     MINIMAX: 'minimax',
     WORKERS_AI: 'workers_ai',
+    CONCENTRATE: 'concentrate',
+    INFERSIA: 'infersia',
 };
 
 /**
@@ -578,4 +581,6 @@ export const SILICONFLOW_ENDPOINT = {
 export const MINIMAX_ENDPOINT = {
     GLOBAL: 'global',
     CN: 'cn',
+    GLOBAL_ANTHROPIC: 'global-anthropic',
+    CN_ANTHROPIC: 'cn-anthropic',
 };

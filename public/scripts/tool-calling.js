@@ -652,6 +652,7 @@ export class ToolManager {
             chat_completion_sources.GROQ,
             chat_completion_sources.COHERE,
             chat_completion_sources.DEEPSEEK,
+            chat_completion_sources.OPENCODEGO,
             chat_completion_sources.MAKERSUITE,
             chat_completion_sources.VERTEXAI,
             chat_completion_sources.AI21,
@@ -665,9 +666,11 @@ export class ToolManager {
             chat_completion_sources.AZURE_OPENAI,
             chat_completion_sources.ZAI,
             chat_completion_sources.SILICONFLOW,
+            chat_completion_sources.INFERSIA,
             chat_completion_sources.NANOGPT,
             chat_completion_sources.WORKERS_AI,
             chat_completion_sources.MINIMAX,
+            chat_completion_sources.CONCENTRATE,
         ];
         return supportedSources.includes(settings.chat_completion_source);
     }
