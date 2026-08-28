@@ -88,3 +88,5 @@ scripts/build-msi.ps1
 # 文档
 提交记录整理.md
 下版本目标.txt
+scripts/scan-upstream-prs.mjs
+UPSTREAM_PRS.md
