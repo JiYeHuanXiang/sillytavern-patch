@@ -2800,7 +2800,8 @@ function renderHtmlPreview(html, title = 'HTML Preview') {
                 <span class="html-preview-title">${escapedTitle}</span>
                 <i class="fa-solid fa-code html-preview-toggle interactable" title="Toggle source view" role="button" tabindex="0"></i>
             </div>
-            <iframe class="html-preview-frame" data-preview-html="${encoded}" data-needs-src="1" sandbox="allow-scripts allow-popups allow-forms" loading="lazy" title="${escapedTitle}"></iframe>
+            <iframe class="html-preview-frame" data-preview-html="${encoded}" data-needs-src="1" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-popups-to-escape-sandbox" loading="lazy" title="${escapedTitle}"></iframe>
+            <div class="html-preview-resizer" title="Drag to resize"><i class="fa-solid fa-grip-lines"></i></div>
             <pre class="html-preview-source" style="display:none;"><code class="language-html">${escapeHtml(html)}</code></pre>
         </div>`;
     } catch (e) {
@@ -2883,9 +2884,14 @@ export function activateHtmlPreviews(scope = document.body) {
             const encoded = frame.getAttribute('data-preview-html');
             if (encoded && frame.isConnected) {
                 try {
-                    // Assign via DOM API (post-sanitization) so the HTML is not
-                    // re-processed by DOMPurify. srcdoc renders inline, no network/blob.
-                    frame.srcdoc = decodeURIComponent(escape(atob(encoded)));
+                    const decoded = decodeURIComponent(escape(atob(encoded)));
+                    // Inject a boot script at the very top of the srcdoc so it runs
+                    // before the preview's own scripts. The sandbox allows same-origin,
+                    // so the iframe shares ST's origin and can reach parent.SillyTavern.
+                    // window.ST is a convenience alias for getContext(), giving preview
+                    // HTML direct access to characters / chat / generate / requestHeaders
+                    // — the same extension API surface ST extensions use.
+                    frame.srcdoc = htmlPreviewBootScript + decoded;
                 } catch (e) {
                     console.error('Failed to decode HTML preview:', e);
                 }
@@ -2896,6 +2902,31 @@ export function activateHtmlPreviews(scope = document.body) {
         }
     });
 }
+
+/**
+ * Prepended to every HTML preview's srcdoc. Exposes `window.ST` — a live view
+ * of SillyTavern's extension context (getContext) — so AI-generated HTML can
+ * read character cards, chat history, trigger AI replies, and call backend
+ * APIs exactly like a first-party extension. The iframe is same-origin (sandbox
+ * has allow-same-origin), so parent.SillyTavern is directly reachable.
+ */
+const htmlPreviewBootScript = `<script>(function(){
+  try {
+    var p = window.parent;
+    if (p && p.SillyTavern && typeof p.SillyTavern.getContext === 'function') {
+      // Live alias: re-reads context each access so it always reflects current state.
+      Object.defineProperty(window, 'ST', {
+        configurable: true,
+        get: function () { return p.SillyTavern.getContext(); }
+      });
+      // Dispatch an event once the bridge is ready, so preview scripts can wait
+      // for it if they run before this boot script (edge case with async loaders).
+      window.dispatchEvent(new CustomEvent('st-bridge-ready'));
+    }
+  } catch (e) {
+    console.error('[ST HTML preview bridge] init failed:', e);
+  }
+})();<\/script>`;
 
 // Event delegation for HTML preview source toggle
 document.addEventListener('click', function (e) {
@@ -2909,12 +2940,43 @@ document.addEventListener('click', function (e) {
     const showingPreview = frame.style.display !== 'none';
     frame.style.display = showingPreview ? 'none' : 'block';
     source.style.display = showingPreview ? 'block' : 'none';
+    const resizer = container.querySelector('.html-preview-resizer');
+    if (resizer) resizer.style.display = showingPreview ? 'none' : 'flex';
     toggle.classList.toggle('fa-eye', showingPreview);
     toggle.classList.toggle('fa-code', !showingPreview);
     toggle.title = showingPreview ? 'Show preview' : 'Show source';
     if (showingPreview) {
         hljs.highlightElement(source.querySelector('code'));
     }
+});
+
+// Drag-to-resize for HTML preview iframes (mouse + touch via Pointer Events)
+document.addEventListener('pointerdown', function (e) {
+    const resizer = e.target.closest('.html-preview-resizer');
+    if (!resizer) return;
+    const container = resizer.closest('.html-preview-container');
+    const frame = container?.querySelector('.html-preview-frame');
+    if (!frame) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = frame.offsetHeight;
+    const minHeight = 150;
+    // Disable iframe pointer events during the drag so pointermove isn't
+    // captured by the iframe — critical on touch, also helps when the mouse
+    // cursor crosses into the frame mid-drag.
+    const prevPointerEvents = frame.style.pointerEvents;
+    frame.style.pointerEvents = 'none';
+    function onMove(ev) {
+        const newHeight = Math.max(minHeight, startHeight + ev.clientY - startY);
+        frame.style.height = `${newHeight}px`;
+    }
+    function onUp() {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        frame.style.pointerEvents = prevPointerEvents;
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
 });
 
 /**

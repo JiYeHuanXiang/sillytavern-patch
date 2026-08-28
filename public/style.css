@@ -5726,6 +5726,36 @@ body:has(#character_popup.open) #top-settings-holder:has(.drawer-content.openDra
     border-radius: 0 !important;
 }
 
+.html-preview-resizer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 6px 0;
+    cursor: ns-resize;
+    background: var(--SmartThemeBlurTintColor);
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    opacity: 0.6;
+    user-select: none;
+    /* Prevent the page from scrolling while a touch drag resizes the frame. */
+    touch-action: none;
+}
+
+.html-preview-resizer:hover {
+    opacity: 1;
+}
+
+.html-preview-resizer i {
+    font-size: calc(var(--mainFontSize) * 0.75);
+    line-height: 1;
+}
+
+/* Enlarge the drag target on touch/coarse pointers for easier resizing. */
+@media (pointer: coarse) {
+    .html-preview-resizer {
+        padding: 12px 0;
+    }
+}
+
 .custom-drawer-icon,
 .inline-drawer-icon {
     display: block;
