@@ -1798,6 +1798,7 @@ export async function sendMinimaxRequest(request, response) {
                 return response.status(500).send(errorJson);
             }
 
+            /** @type {any} */
             const generateResponseJson = await generateResponse.json();
             const responseText = generateResponseJson?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n\n') || '';
             const reply = { choices: [{ index: 0, message: { content: responseText } }], content: generateResponseJson.content };
