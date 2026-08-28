@@ -4,6 +4,44 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.2.2] - 2026-08-28
+
+### ✨ 新增
+
+- **HTML 预览支持拖拽调整大小**：预览窗口底部新增可拖拽手柄，鼠标与触摸
+  均可上下拖动调整 iframe 高度（最小 150px）。移动端适配：`touch-action:
+  none` 防止拖拽时页面误滚、`@media (pointer: coarse)` 放大触摸命中区、
+  拖拽期间临时禁用 iframe 指针事件防止 iframe 吞掉 `pointermove`。
+- **HTML 预览去除沙盒同源限制，与 ST 数据/AI 互联**：iframe sandbox 新增
+  `allow-same-origin` / `allow-modals`，预览与 ST 同源。`activateHtmlPreviews`
+  在每个预览 srcdoc 顶部注入 boot 脚本，将 `window.ST` 注册为
+  `parent.SillyTavern.getContext()` 的实时别名——预览内 HTML 获得与 ST 扩展
+  同等的 API 面：可直接读取当前角色卡（`ST.characters[ST.characterId]`）、
+  聊天记录（`ST.chat`）、用户/角色名，触发 AI 回复（`ST.generate(...)`
+  正常消息流 / `ST.generateQuietPrompt({quietPrompt, quietToLoud})` 静默模式
+  返回回复字符串），以及经 `ST.getRequestHeaders()` 调用任意后端 API。
+  默认静默模式：回复显示在预览内、不污染聊天流。另派发 `st-bridge-ready`
+  事件供异步加载的脚本等待桥接就绪。
+- **模型图标优先匹配专属图标，回退供应商图标**：模型列表图标优先匹配
+  模型专属图标资源，无匹配时回退到所属供应商图标。
+- **SiliconFlow 思考控件显示**：经硅基流动接入时为 DeepSeek V4 等模型显示
+  思考（reasoning）模式控件。
+- **恢复原生气泡扩展 + 开放时间感知配置 + 移植 Pollinations 匿名端点**：
+  恢复上游被改动的原生扩展机制；时间感知相关参数开放用户配置；移植
+  Pollinations 匿名调用端点。
+- **同步 20 个上游 PR**：含 6 个新供应商/模型 PR、10 个 bug 修复+性能+供应商
+  同步 PR、14 个 bug 修复+安全加固 PR。
+
+### 🔧 调整
+
+- **怠惰加载根据角色卡数量自动启用**：根据角色卡数量动态判断是否启用怠惰
+  加载，避免角色数量少时无谓的加载开销。
+
+### 🐛 修复
+
+- **lint 报错 no-useless-escape**：HTML 预览 boot 脚本中闭合标签的 `\/`
+  不必要转义，改为字符串拼接（`'</' + 'script>'`）消除 lint 错误。
+
 ## [1.18.0-patch-2.2.1] - 2026-08-23
 
 ### 🐛 修复
