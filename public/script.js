@@ -2926,7 +2926,7 @@ const htmlPreviewBootScript = `<script>(function(){
   } catch (e) {
     console.error('[ST HTML preview bridge] init failed:', e);
   }
-})();<\/script>`;
+})();</` + 'script>';
 
 // Event delegation for HTML preview source toggle
 document.addEventListener('click', function (e) {
