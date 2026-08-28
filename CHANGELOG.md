@@ -41,6 +41,9 @@
 
 - **lint 报错 no-useless-escape**：HTML 预览 boot 脚本中闭合标签的 `\/`
   不必要转义，改为字符串拼接（`'</' + 'script>'`）消除 lint 错误。
+- **MiniMax 响应 typecheck 报错**：`generateResponse.json()` 返回 `unknown`，
+  访问 `.content` 触发 `TS18046`/`TS2339`。补 `/** @type {any} */` JSDoc 注解，
+  与同文件 Claude 分支既有写法一致，使 `Type check (informational)` CI job 转绿。
 
 ## [1.18.0-patch-2.2.1] - 2026-08-23
 
