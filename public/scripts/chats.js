@@ -39,13 +39,11 @@ import {
     getBase64Async,
     getStringHash,
     humanFileSize,
-    saveBase64AsFile,
     uploadImageAsForm,
     uploadFileAsForm,
     extractTextFromOffice,
     download,
     getFileText,
-    getFileExtension,
     convertTextToBase64,
     isSameFile,
     clamp,
@@ -207,7 +205,6 @@ export async function populateFileAttachment(message, inputId = 'file_form_input
         for (const file of fileInput.files) {
             const slug = getStringHash(file.name);
             const fileNamePrefix = `${Date.now()}_${slug}`;
-            const extension = getFileExtension(file);
 
             const mediaType = MEDIA_TYPE.getFromMime(file.type);
             if (mediaType) {
