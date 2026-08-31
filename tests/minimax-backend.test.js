@@ -16,6 +16,7 @@ jest.unstable_mockModule('../src/util.js', () => ({
     flattenSchema: value => value,
     forwardFetchResponse: jest.fn(),
     getConfigValue: (_key, defaultValue) => defaultValue,
+    inlineLocalVideoMedia: () => undefined,
     isValidUrl: value => URL.canParse(value),
     mergeObjectWithYaml: value => value,
     trimTrailingSlash: value => value.replace(/\/+$/, ''),

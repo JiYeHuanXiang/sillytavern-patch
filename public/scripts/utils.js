@@ -1708,6 +1708,72 @@ export async function saveBase64AsFile(base64Data, subFolder, fileName, extensio
 }
 
 /**
+ * Uploads an image file to the backend via multipart form data, avoiding a
+ * full base64 copy of the file in the browser heap.
+ *
+ * @param {File} file - The raw file to upload.
+ * @param {string} [subFolder] - Optional character name to determine the sub-directory.
+ * @param {string} [fileName] - Optional base filename (without extension).
+ * @returns {Promise<string>} - Resolves to the saved image's path on the server.
+ *                              Rejects with an error if the upload fails.
+ */
+export async function uploadImageAsForm(file, subFolder, fileName) {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    if (subFolder) {
+        formData.append('ch_name', subFolder);
+    }
+    if (fileName) {
+        formData.append('filename', String(fileName).replace(/\./g, '_'));
+    }
+
+    const response = await fetch('/api/images/upload-form', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: formData,
+    });
+
+    if (response.ok) {
+        const responseData = await response.json();
+        return responseData.path;
+    } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to upload the image to the server');
+    }
+}
+
+/**
+ * Uploads a generic file to the backend via multipart form data, avoiding a
+ * full base64 copy of the file in the browser heap.
+ *
+ * @param {File} file - The raw file to upload.
+ * @param {string} [name] - Optional filename; falls back to the file's original name.
+ * @returns {Promise<string>} - Resolves to the saved file's path on the server.
+ *                              Rejects with an error if the upload fails.
+ */
+export async function uploadFileAsForm(file, name) {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    if (name) {
+        formData.append('name', name);
+    }
+
+    const response = await fetch('/api/files/upload-form', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: formData,
+    });
+
+    if (response.ok) {
+        const responseData = await response.json();
+        return responseData.path;
+    } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to upload the file to the server');
+    }
+}
+
+/**
  * Gets the file extension from a File object.
  * @param {File} file The file to get the extension from
  * @returns {string} The file extension of the given file

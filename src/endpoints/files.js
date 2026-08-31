@@ -51,6 +51,42 @@ router.post('/upload', async (request, response) => {
     }
 });
 
+/**
+ * Endpoint to handle file uploads via multipart form data.
+ * The raw file is streamed to disk by the global multer middleware and moved
+ * into place here, avoiding a full base64 copy of the file in the browser heap.
+ *
+ * @route POST /api/files/upload-form
+ * @param {Express.Multer.File} request.file - The uploaded file (field name 'avatar').
+ * @param {string} [request.body.name] - Optional filename; falls back to the original name.
+ * @returns {Object} response - The response object containing the path where the file was saved.
+ */
+router.post('/upload-form', async (request, response) => {
+    const file = request.file;
+    try {
+        if (!file) {
+            return response.status(400).send('No file provided');
+        }
+
+        const name = request.body.name || file.originalname;
+        const validation = validateAssetFileName(name);
+        if (validation.error) {
+            try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+            return response.status(400).send(validation.message);
+        }
+
+        const pathToUpload = path.join(request.user.directories.files, name);
+        await fs.promises.rename(file.path, pathToUpload);
+        const url = clientRelativePath(request.user.directories.root, pathToUpload);
+        console.info('Uploaded file: ' + url + ' from ' + request.user.profile.handle);
+        return response.json({ path: url });
+    } catch (error) {
+        console.error(error);
+        try { if (file) fs.unlinkSync(file.path); } catch { /* ignore */ }
+        return response.sendStatus(500);
+    }
+});
+
 router.post('/delete', async (request, response) => {
     try {
         if (!request.body.path) {

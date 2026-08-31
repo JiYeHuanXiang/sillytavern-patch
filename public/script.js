@@ -5876,6 +5876,55 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
     }
 
     /**
+     * Replaces inline base64 media (data URLs) in a prompt with short
+     * placeholders so that itemized prompt storage does not retain or persist
+     * full media payloads per generation. Operates copy-on-write: the original
+     * prompt is not mutated, only the returned copy used for storage.
+     * @param {string|Array|*} prompt The prompt to strip (string or messages array).
+     * @returns {string|Array|*} A copy with inline base64 media replaced by placeholders.
+     */
+    function stripInlineMediaForItemization(prompt) {
+        if (typeof prompt === 'string') {
+            return prompt.replace(/data:[a-z]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{200,}/gi, match => {
+                const sizeBytes = Math.floor((match.length - match.indexOf('base64,') - 7) * 3 / 4);
+                const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
+                return `[inline media omitted: ${sizeMB} MB]`;
+            });
+        }
+        if (Array.isArray(prompt)) {
+            return prompt.map(message => {
+                if (!message || typeof message !== 'object') {
+                    return message;
+                }
+                if (typeof message.content === 'string') {
+                    return { ...message, content: stripInlineMediaForItemization(message.content) };
+                }
+                if (Array.isArray(message.content)) {
+                    return {
+                        ...message,
+                        content: message.content.map(part => {
+                            if (!part || typeof part !== 'object') {
+                                return part;
+                            }
+                            // Replace base64 URLs in image_url / video_url parts.
+                            const urlKey = part.image_url?.url != null ? 'image_url' : (part.video_url?.url != null ? 'video_url' : null);
+                            if (urlKey && typeof part[urlKey].url === 'string' && part[urlKey].url.startsWith('data:')) {
+                                const match = part[urlKey].url;
+                                const sizeBytes = Math.floor((match.length - match.indexOf('base64,') - 7) * 3 / 4);
+                                const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
+                                return { ...part, [urlKey]: { ...part[urlKey], url: `[inline media omitted: ${sizeMB} MB]` } };
+                            }
+                            return part;
+                        }),
+                    };
+                }
+                return message;
+            });
+        }
+        return prompt;
+    }
+
+    /**
      * Saves itemized prompt bits and calls streaming or non-streaming generation API.
      * @returns {Promise<void|*|Awaited<*>|String|{fromStream}|string|undefined|Object>}
      * @throws {Error|object} Error with message text, or Error with response JSON (OAI/Horde), or the actual response JSON (novel|textgenerationwebui|kobold)
@@ -5893,7 +5942,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         let currentArrayEntry = Number(thisPromptBits.length - 1);
         let additionalPromptStuff = {
             ...thisPromptBits[currentArrayEntry],
-            rawPrompt: generate_data.prompt || generate_data.input,
+            rawPrompt: stripInlineMediaForItemization(generate_data.prompt || generate_data.input),
             mesId: getNextMessageId(type),
             allAnchors: await getAllExtensionPrompts(),
             chatInjects: injectedIndices?.map(index => arrMes[arrMes.length - index - 1])?.join('') || '',

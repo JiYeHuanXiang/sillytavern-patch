@@ -33,6 +33,7 @@ import {
     trimTrailingSlash,
     flattenSchema,
     combineAbortSignals,
+    inlineLocalVideoMedia,
 } from '../../util.js';
 import { assertSafeFetchUrl } from '../../url-safety.js';
 import {
@@ -2439,6 +2440,13 @@ router.post('/generate', async function (request, response) {
             if (!_usesThinkingToggle) {
                 request.body.reasoning_effort = 'low';
             }
+        }
+
+        // Inline local video files into base64 data URLs on the server so that
+        // large videos never enter the browser JS heap at generation time.
+        // Runs before provider branching so downstream converters see data URLs.
+        if (Array.isArray(request.body.messages)) {
+            inlineLocalVideoMedia(request.body.messages, request.user.directories);
         }
 
         switch (request.body.chat_completion_source) {

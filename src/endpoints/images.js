@@ -77,6 +77,54 @@ router.post('/upload', async (request, response) => {
     }
 });
 
+/**
+ * Endpoint to handle image uploads via multipart form data.
+ * The raw file is streamed to disk by the global multer middleware and moved
+ * into place here, avoiding a full base64 copy of the file in the browser heap.
+ *
+ * @route POST /api/images/upload-form
+ * @param {Express.Multer.File} request.file - The uploaded file (field name 'avatar').
+ * @param {string} [request.body.ch_name] - Optional character name to determine the sub-directory.
+ * @param {string} [request.body.filename] - Optional base filename (without extension).
+ * @returns {Object} response - The response object containing the path where the image was saved.
+ */
+router.post('/upload-form', async (request, response) => {
+    const file = request.file;
+    try {
+        if (!file) {
+            return response.status(400).send({ error: 'No file provided' });
+        }
+
+        const extension = path.extname(file.originalname).toLowerCase().replace(/^\./, '');
+        const validFormat = MEDIA_EXTENSIONS.includes(extension);
+        if (!validFormat) {
+            try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+            return response.status(400).send({ error: 'Invalid image format' });
+        }
+
+        let filename;
+        if (request.body.filename) {
+            filename = removeFileExtension(request.body.filename) + '.' + extension;
+        } else {
+            filename = Date.now() + '.' + extension;
+        }
+        filename = sanitize(filename);
+
+        let pathToNewFile = path.join(request.user.directories.userImages, filename);
+        if (request.body.ch_name) {
+            pathToNewFile = path.join(request.user.directories.userImages, sanitize(request.body.ch_name), filename);
+        }
+
+        ensureDirectoryExistence(pathToNewFile);
+        await fs.promises.rename(file.path, pathToNewFile);
+        response.json({ path: clientRelativePath(request.user.directories.root, pathToNewFile) });
+    } catch (error) {
+        console.error(error);
+        try { if (file) fs.unlinkSync(file.path); } catch { /* ignore */ }
+        response.status(500).send({ error: 'Failed to save the image' });
+    }
+});
+
 router.post('/list/:folder?', (request, response) => {
     try {
         if (request.params.folder) {

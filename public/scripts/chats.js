@@ -40,6 +40,8 @@ import {
     getStringHash,
     humanFileSize,
     saveBase64AsFile,
+    uploadImageAsForm,
+    uploadFileAsForm,
     extractTextFromOffice,
     download,
     getFileText,
@@ -205,13 +207,13 @@ export async function populateFileAttachment(message, inputId = 'file_form_input
         for (const file of fileInput.files) {
             const slug = getStringHash(file.name);
             const fileNamePrefix = `${Date.now()}_${slug}`;
-            const fileBase64 = await getBase64Async(file);
-            let base64Data = fileBase64.split(',')[1];
             const extension = getFileExtension(file);
 
             const mediaType = MEDIA_TYPE.getFromMime(file.type);
             if (mediaType) {
-                const imageUrl = await saveBase64AsFile(base64Data, name2, fileNamePrefix, extension);
+                // Upload the raw file via multipart form data so large videos and
+                // images never get base64-encoded into the browser heap.
+                const imageUrl = await uploadImageAsForm(file, name2, fileNamePrefix);
                 if (!Array.isArray(message.extra.media)) {
                     message.extra.media = [];
                 }
@@ -229,6 +231,7 @@ export async function populateFileAttachment(message, inputId = 'file_form_input
                 const uniqueFileName = `${fileNamePrefix}.txt`;
 
                 if (isConvertible(file.type)) {
+                    let base64Data;
                     try {
                         const converter = getConverter(file.type);
                         const fileText = await converter(file);
@@ -236,25 +239,40 @@ export async function populateFileAttachment(message, inputId = 'file_form_input
                     } catch (error) {
                         toastr.error(String(error), t`Could not convert file`);
                         console.error('Could not convert file', error);
+                        continue;
                     }
+
+                    const fileUrl = await uploadFileAttachment(uniqueFileName, base64Data);
+
+                    if (!fileUrl) {
+                        continue;
+                    }
+
+                    if (!Array.isArray(message.extra.files)) {
+                        message.extra.files = [];
+                    }
+
+                    message.extra.files.push({
+                        url: fileUrl,
+                        size: file.size,
+                        name: file.name,
+                        created: Date.now(),
+                    });
+                } else {
+                    // Non-convertible text file: upload the raw file directly.
+                    const fileUrl = await uploadFileAsForm(file, uniqueFileName);
+
+                    if (!Array.isArray(message.extra.files)) {
+                        message.extra.files = [];
+                    }
+
+                    message.extra.files.push({
+                        url: fileUrl,
+                        size: file.size,
+                        name: file.name,
+                        created: Date.now(),
+                    });
                 }
-
-                const fileUrl = await uploadFileAttachment(uniqueFileName, base64Data);
-
-                if (!fileUrl) {
-                    continue;
-                }
-
-                if (!Array.isArray(message.extra.files)) {
-                    message.extra.files = [];
-                }
-
-                message.extra.files.push({
-                    url: fileUrl,
-                    size: file.size,
-                    name: file.name,
-                    created: Date.now(),
-                });
             }
         }
     } catch (error) {
@@ -332,17 +350,24 @@ export async function getFileAttachment(url) {
  * @returns {Promise<boolean>} True if file is valid, false otherwise.
  */
 async function validateFile(file) {
-    const fileText = await file.text();
     const isMedia = file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/');
+
+    // Skip reading media files as text: the binary-content check does not apply to
+    // them, and reading a large video into a string would exhaust the browser heap.
+    if (isMedia) {
+        return true;
+    }
+
+    const fileText = await file.text();
     const isBinary = /^[\x00-\x08\x0E-\x1F\x7F-\xFF]*$/.test(fileText);
 
-    if (!isMedia && file.size > fileSizeLimit) {
+    if (file.size > fileSizeLimit) {
         toastr.error(t`File is too big. Maximum size is ${humanFileSize(fileSizeLimit)}.`);
         return false;
     }
 
     // If file is binary
-    if (isBinary && !isMedia && !isConvertible(file.type)) {
+    if (isBinary && !isConvertible(file.type)) {
         toastr.error(t`Binary files are not supported. Select a text file or image.`);
         return false;
     }

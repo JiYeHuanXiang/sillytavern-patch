@@ -3796,7 +3796,12 @@ class Message {
     async addVideo(video) {
         this.content = this.ensureContentIsArray();
         const isDataUrl = isDataURL(video);
-        if (!isDataUrl) {
+        // Local server-relative paths (e.g. '/user/images/foo.mp4') are passed
+        // through as-is so the server can read and base64-encode the file itself,
+        // keeping large video bytes out of the browser JS heap. Only remote URLs
+        // and data URLs go through the previous fetch-and-encode path.
+        const isLocalPath = typeof video === 'string' && video.startsWith('/') && !video.startsWith('//');
+        if (!isDataUrl && !isLocalPath) {
             try {
                 const response = await fetch(video, { method: 'GET', cache: 'force-cache' });
                 if (!response.ok) throw new Error('Failed to fetch video');
@@ -6584,6 +6589,16 @@ export function isVideoInliningSupported() {
             return videoSupportedModels.some(model => oai_settings.zai_model.includes(model));
         case chat_completion_sources.MINIMAX:
             return oai_settings.minimax_model === 'MiniMax-M3';
+        case chat_completion_sources.CUSTOM: {
+            const customModel = oai_settings.custom_model?.toLowerCase();
+            if (!customModel) {
+                return false;
+            }
+            return videoSupportedModels.some(model => {
+                const prefix = model.includes('-') ? model.slice(0, model.indexOf('-')) : model;
+                return customModel.includes(prefix.toLowerCase());
+            });
+        }
         default:
             return false;
     }
