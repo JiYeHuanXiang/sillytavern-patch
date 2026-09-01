@@ -4,6 +4,25 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.0-patch-2.2.3] - 待发布
+
+### ✨ 新增
+
+- **自定义端点思考模式手动分类**：Custom 源 API 设置页面新增「思考模式
+  类型」下拉框，用户可手动指定自定义模型的思考关闭方式：
+  - **不确定（默认，OpenAI 兼容）**：将「关闭思考」映射为最低强度 `low`，
+    无条件转发 `reasoning_effort`。
+  - **无法关闭（OpenAI 类）**：同上。
+  - **通过 thinking 关闭（DeepSeek 类）**：发送 `{thinking:{type:'disabled'}}`
+    控制开关，`reasoning_effort` 控制深度。
+  - **通过 enable_thinking 关闭（Qwen 类）**：将「关闭思考」映射为
+    `reasoning_effort: 'none'`（LM Studio/llama.cpp 原生支持），同时发送
+    `chat_template_kwargs:{enable_thinking:false}` 和顶层 `enable_thinking:false`
+    作为 vLLM/SGLang 兼容回退。适用于 Qwen3 及类似模型。
+  此前 Custom 源的 `reasoning_effort` 仅在模型名命中 OpenAI o-series/gpt-5
+  白名单或 `koboldcpp/` 前缀时才被转发，其他模型（Qwen3、GLM、Kimi 等）
+  的思考模式设置被静默丢弃。
+
 ## [1.18.0-patch-2.2.2] - 2026-08-28
 
 ### ✨ 新增

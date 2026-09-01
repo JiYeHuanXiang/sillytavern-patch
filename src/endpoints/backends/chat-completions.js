@@ -2426,8 +2426,15 @@ router.post('/generate', async function (request, response) {
         // For everything else, when the user explicitly requests "disabled"
         // (reasoning_effort === 'disabled'), map it to the minimum depth 'low' so
         // behaviour is as close to "off" as the model allows.
+        //
+        // For the CUSTOM source, the user manually classifies the model via the
+        // "custom_thinking_mode_type" setting:
+        //   'disable_deepseek'   → DeepSeek-style, keeps 'disabled' ({thinking:{type}})
+        //   'disable_qwen'       → Qwen-style, keeps 'disabled' (mapped to 'none' later)
+        //   'disable_unsupported'→ OpenAI-style, coerce to 'low'
+        //   'auto'               → default to OpenAI-style, coerce to 'low'
         if (request.body.reasoning_effort === 'disabled') {
-            const _usesThinkingToggle = /^deepseek-/.test(request.body.model)
+            let _usesThinkingToggle = /^deepseek-/.test(request.body.model)
                 || [
                     CHAT_COMPLETION_SOURCES.DEEPSEEK,
                     CHAT_COMPLETION_SOURCES.MOONSHOT,
@@ -2437,6 +2444,13 @@ router.post('/generate', async function (request, response) {
                     CHAT_COMPLETION_SOURCES.MAKERSUITE,
                     CHAT_COMPLETION_SOURCES.VERTEXAI,
                 ].includes(request.body.chat_completion_source);
+
+            // Respect the user's manual classification for Custom endpoints
+            if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM
+                && ['disable_deepseek', 'disable_qwen'].includes(request.body.custom_thinking_mode_type)) {
+                _usesThinkingToggle = true;
+            }
+
             if (!_usesThinkingToggle) {
                 request.body.reasoning_effort = 'low';
             }
@@ -2844,13 +2858,31 @@ router.post('/generate', async function (request, response) {
             return response.status(400).send({ error: true });
         }
 
-        // A few of OpenAIs reasoning models support reasoning effort
+        // A few of OpenAIs reasoning models support reasoning effort.
+        // For CUSTOM source, forward reasoning_effort unconditionally — the
+        // client already resolved source/model-specific value mappings and
+        // the user classified the model's thinking capabilities via
+        // custom_thinking_mode_type. Models that don't accept this field
+        // can exclude it via custom_exclude_body.
+        //
+        // For 'disable_deepseek' mode, skip reasoning_effort when 'disabled'
+        // — DeepSeek's {thinking:{type:'disabled'}} handles it.
+        // For 'disable_qwen' mode, map 'disabled' → 'none' (LM Studio/llama.cpp
+        // reasoning_effort value for fully off) so thinking is actually disabled.
         if (request.body.reasoning_effort && [CHAT_COMPLETION_SOURCES.CUSTOM, CHAT_COMPLETION_SOURCES.OPENAI].includes(request.body.chat_completion_source)) {
-            if (OPENAI_REASONING_EFFORT_MODELS.includes(request.body.model)) {
+            if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM) {
+                if (request.body.custom_thinking_mode_type === 'disable_deepseek'
+                    && request.body.reasoning_effort === 'disabled') {
+                    // DeepSeek-style: {thinking:{type:'disabled'}} handles it
+                } else if (request.body.custom_thinking_mode_type === 'disable_qwen'
+                    && request.body.reasoning_effort === 'disabled') {
+                    // Qwen on LM Studio/llama.cpp: 'none' fully disables thinking
+                    bodyParams['reasoning_effort'] = 'none';
+                } else {
+                    bodyParams['reasoning_effort'] = request.body.reasoning_effort;
+                }
+            } else if (OPENAI_REASONING_EFFORT_MODELS.includes(request.body.model)) {
                 bodyParams['reasoning_effort'] = OPENAI_FIXED_REASONING_EFFORT[request.body.model] ?? OPENAI_REASONING_EFFORT_MAP[request.body.reasoning_effort] ?? request.body.reasoning_effort;
-            }
-            if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM && /^koboldcpp\/(.+)$/.test(request.body.model)) {
-                bodyParams['reasoning_effort'] = request.body.reasoning_effort;
             }
         }
 
@@ -2924,10 +2956,46 @@ router.post('/generate', async function (request, response) {
         // (Non-DeepSeek "disabled" is already coerced to 'low' before dispatch;
         //  models that don't support {thinking:{type}} keep using reasoning_effort.)
         if (!requestBody.thinking) {
-            const _thinking = resolveDeepSeekThinking(request.body.model, request.body.include_reasoning, request.body.reasoning_effort);
-            if (_thinking) {
-                requestBody['thinking'] = _thinking;
+            if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM
+                && request.body.custom_thinking_mode_type === 'disable_deepseek') {
+                // DeepSeek-style: {thinking:{type:'enabled'|'disabled'}}
+                const hasActiveEffort = request.body.reasoning_effort
+                    && request.body.reasoning_effort !== 'auto'
+                    && request.body.reasoning_effort !== 'disabled';
+                const shouldDisable = request.body.reasoning_effort === 'disabled'
+                    || (!hasActiveEffort && !request.body.include_reasoning);
+                requestBody['thinking'] = { type: shouldDisable ? 'disabled' : 'enabled' };
+            } else {
+                const _thinking = resolveDeepSeekThinking(request.body.model, request.body.include_reasoning, request.body.reasoning_effort);
+                if (_thinking) {
+                    requestBody['thinking'] = _thinking;
+                }
             }
+        }
+
+        // Qwen-style thinking control. The primary mechanism is reasoning_effort
+        // (mapped to 'none' for disabled, already set in bodyParams above) which
+        // LM Studio/llama.cpp support natively.
+        // We also send chat_template_kwargs.enable_thinking and a top-level
+        // enable_thinking as fallbacks for vLLM/SGLang runtimes.
+        // The {thinking:{type}} format is not recognized by Qwen runtimes.
+        if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM
+            && request.body.custom_thinking_mode_type === 'disable_qwen') {
+            const hasActiveEffort = request.body.reasoning_effort
+                && request.body.reasoning_effort !== 'auto'
+                && request.body.reasoning_effort !== 'disabled';
+            const shouldDisable = request.body.reasoning_effort === 'disabled'
+                || (!hasActiveEffort && !request.body.include_reasoning);
+            const enableThinking = !shouldDisable;
+            // Fallback fields for vLLM/SGLang — LM Studio ignores these
+            requestBody['enable_thinking'] = enableThinking;
+            requestBody['chat_template_kwargs'] = {
+                ...(requestBody['chat_template_kwargs'] || {}),
+                enable_thinking: enableThinking,
+            };
+            // Qwen runtimes don't use the {thinking:{type}} field — remove it
+            // if it was set by the DeepSeek fallback above.
+            delete requestBody['thinking'];
         }
 
         if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM) {

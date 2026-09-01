@@ -3890,6 +3890,16 @@
                             <div class="flex-container">
                                 <select id="model_custom_select" class="text_pole model_custom_select"></select>
                             </div>
+                            <h4 data-i18n="Thinking Mode Type">Thinking Mode Type</h4>
+                            <div class="flex-container">
+                                <select id="custom_thinking_mode_type" class="text_pole wide100p">
+                                    <option value="auto" data-i18n="custom_thinking_auto">Unsure (OpenAI-compatible)</option>
+                                    <option value="disable_unsupported" data-i18n="custom_thinking_disable_unsupported">Cannot disable (OpenAI-style)</option>
+                                    <option value="disable_deepseek" data-i18n="custom_thinking_disable_deepseek">Disable via thinking type (DeepSeek-style)</option>
+                                    <option value="disable_qwen" data-i18n="custom_thinking_disable_qwen">Disable via enable_thinking (Qwen-style)</option>
+                                </select>
+                            </div>
+                            <small data-i18n="custom_thinking_mode_desc">Controls how thinking mode is sent to the custom endpoint. "Cannot disable" maps disabled to the lowest effort level (OpenAI-style). "Disable via thinking type" sends {thinking:{type:'disabled'}} (DeepSeek-style). "Disable via enable_thinking" sends {chat_template_kwargs:{enable_thinking:false}} (Qwen3 on vLLM/Ollama).</small>
                         </form>
                         <div id="xai_form" data-source="xai">
                             <h4>

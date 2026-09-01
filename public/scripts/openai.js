@@ -368,6 +368,7 @@ export const settingsToUpdate = {
     custom_include_body: ['#custom_include_body', 'custom_include_body', false, true],
     custom_exclude_body: ['#custom_exclude_body', 'custom_exclude_body', false, true],
     custom_include_headers: ['#custom_include_headers', 'custom_include_headers', false, true],
+    custom_thinking_mode_type: ['#custom_thinking_mode_type', 'custom_thinking_mode_type', false, true],
     custom_prompt_post_processing: ['#custom_prompt_post_processing', 'custom_prompt_post_processing', false, true],
     google_model: ['#model_google_select', 'google_model', false, true],
     vertexai_model: ['#model_vertexai_select', 'vertexai_model', false, true],
@@ -496,6 +497,7 @@ const default_settings = {
     custom_include_body: '',
     custom_exclude_body: '',
     custom_include_headers: '',
+    custom_thinking_mode_type: 'auto',
     openrouter_model: openrouter_website_model,
     openrouter_use_fallback: false,
     openrouter_providers: [],
@@ -3027,6 +3029,7 @@ export async function createGenerationParameters(settings, model, type, messages
         generate_data.custom_include_body = settings.custom_include_body;
         generate_data.custom_exclude_body = settings.custom_exclude_body;
         generate_data.custom_include_headers = settings.custom_include_headers;
+        generate_data.custom_thinking_mode_type = settings.custom_thinking_mode_type;
     }
 
     if (settings.chat_completion_source === chat_completion_sources.COHERE) {
@@ -7377,6 +7380,11 @@ export function initOpenAI() {
 
     $('#openai_reasoning_effort').on('input', function () {
         oai_settings.reasoning_effort = String($(this).val());
+        saveSettingsDebounced();
+    });
+
+    $('#custom_thinking_mode_type').on('input', function () {
+        oai_settings.custom_thinking_mode_type = String($(this).val());
         saveSettingsDebounced();
     });
 
