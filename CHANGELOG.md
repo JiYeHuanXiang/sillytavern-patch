@@ -22,6 +22,19 @@
   此前 Custom 源的 `reasoning_effort` 仅在模型名命中 OpenAI o-series/gpt-5
   白名单或 `koboldcpp/` 前缀时才被转发，其他模型（Qwen3、GLM、Kimi 等）
   的思考模式设置被静默丢弃。
+- **拓展插件 zip 导入**：拓展设置面板新增「导入拓展」按钮，点击后在文件
+  浏览器中选择 zip 压缩包即可安装第三方拓展。服务端新增
+  `POST /api/extensions/install-zip` 端点，安装前严格校验，不通过的文件
+  不会被放入拓展目录、不会被当作拓展加载：`manifest.json` 必须为合法
+  JSON 对象并提供 `display_name`/`name` 与 `js` 入口；声明的 `js`/`css`
+  文件必须真实存在于包内；拒绝路径穿越、符号链接、盘符绝对路径，并限制
+  压缩包大小与解压总量（防 zip 炸弹）。同时支持 GitHub 自动打包的
+  「单顶层目录」结构与 manifest 位于根级的扁平结构。URL（Git 仓库）安装
+  功能保持不变。
+- **Extras API URL 输入框收缩为按钮**：拓展设置面板的 Extras API URL 输入框
+  收缩为「Extras API URL」按钮（点击弹窗编辑并保存），与「导入拓展」按钮
+  并排展示，连接逻辑不变；同步修复该行按钮在中文界面下被压成一字一行的
+  布局问题（`width: min-content` 对 CJK 的逐字换行）。
 
 ## [1.18.0-patch-2.2.2] - 2026-08-28
 

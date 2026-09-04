@@ -5953,12 +5953,18 @@
                             </label>
                         </div>
                     </div>
-                    <div class="alignitemsflexstart flex-container wide100p">
-                        <input id="extensions_url" type="text" class="flex1 heightFitContent text_pole widthNatural" data-i18n="[placeholder]Extras API URL" placeholder="Extras API URL">
-                        <input id="extensions_api_key" type="text" class="flex1 heightFitContent text_pole widthNatural" data-i18n="[placeholder]Extras API key (optional)" placeholder="Extras API key (optional)">
-                        <div class="extensions_url_block">
-                            <div id="extensions_connect" class="menu_button" data-i18n="Connect">Connect</div>
+                    <div class="alignitemscenter flex-container wide100p">
+                        <div id="extensions_url_button" class="menu_button" title="Set the Extras API URL" data-i18n="[title]Set the Extras API URL">
+                            <i class="fa-solid fa-link"></i>
+                            <span data-i18n="Extras API URL">Extras API URL</span>
                         </div>
+                        <div id="extension_import_zip_button" class="menu_button" title="Import extension from a ZIP archive" data-i18n="[title]Import extension from a ZIP archive">
+                            <i class="fa-solid fa-file-import"></i>
+                            <span data-i18n="Import extension">Import extension</span>
+                        </div>
+                        <input type="file" id="extension_import_zip_file" accept=".zip" hidden>
+                        <input id="extensions_api_key" type="text" class="flex1 heightFitContent text_pole widthNatural" data-i18n="[placeholder]Extras API key (optional)" placeholder="Extras API key (optional)">
+                        <div id="extensions_connect" class="menu_button" data-i18n="Connect">Connect</div>
                     </div>
                 </div>
             </div>

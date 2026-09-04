@@ -1,6 +1,16 @@
 /* Extensions */
-#extensions_url {
-    display: block;
+
+/* The collapsed Extras API URL / ZIP import / Connect buttons sit in a narrow
+   drawer. `.menu_button` sizes itself to min-content, which wraps CJK labels
+   one character per line, so keep these buttons on a single line. */
+#extensions_url_button,
+#extension_import_zip_button,
+#extensions_connect {
+    width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 3px 10px;
+    gap: 5px;
 }
 
 .extensions_block input[type="submit"]:hover {
@@ -17,17 +27,6 @@ label[for="extensions_autoconnect"] {
     display: flex;
     align-items: center;
     margin: 0 !important;
-}
-
-.extensions_url_block {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.extensions_url_block h4 {
-    display: inline;
 }
 
 .extensions_block {

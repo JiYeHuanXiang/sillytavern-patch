@@ -668,12 +668,28 @@ async function activateExtensions() {
 }
 
 async function connectClickHandler() {
-    const baseUrl = String($('#extensions_url').val());
-    extension_settings.apiUrl = baseUrl;
+    const baseUrl = String(extension_settings.apiUrl ?? '');
     const testApiKey = $('#extensions_api_key').val();
     extension_settings.apiKey = String(testApiKey);
     saveSettingsDebounced();
     await connectToApi(baseUrl);
+}
+
+/**
+ * Opens a popup to view and change the Extras API URL.
+ * The URL is persisted to the extension settings and used when connecting to the Extras API.
+ * @returns {Promise<void>}
+ */
+async function openExtrasApiUrlPopup() {
+    const popup = new Popup(t`Extras API URL`, POPUP_TYPE.INPUT, String(extension_settings.apiUrl ?? ''), { okButton: t`Save` });
+    const input = await popup.show();
+
+    if (input == null) {
+        return;
+    }
+
+    extension_settings.apiUrl = String(input).trim();
+    saveSettingsDebounced();
 }
 
 function autoConnectInputHandler() {
@@ -1786,6 +1802,58 @@ export async function installExtension(url, global, branch = '') {
 }
 
 /**
+ * Installs a third-party extension from a user-selected ZIP archive.
+ * The archive is uploaded as multipart form data and extracted by the server
+ * into the user's third-party extensions directory.
+ * @param {File} file ZIP archive selected by the user
+ * @returns {Promise<boolean>} True if the extension was imported successfully, false otherwise
+ */
+async function importExtensionFromZip(file) {
+    try {
+        if (!file.name.toLowerCase().endsWith('.zip')) {
+            toastr.error(t`Please select a ZIP archive.`, t`Import extension failed`);
+            return false;
+        }
+
+        toastr.info(t`Please wait...`, t`Importing extension`);
+
+        // The global server-side multer middleware reads the 'avatar' field
+        const formData = new FormData();
+        formData.set('avatar', file);
+
+        const request = await fetch('/api/extensions/install-zip', {
+            method: 'POST',
+            headers: getRequestHeaders({ omitContentType: true }),
+            body: formData,
+        });
+
+        if (!request.ok) {
+            const text = await request.text();
+            toastr.warning(text || request.statusText, t`Import extension failed`, { timeOut: 5000 });
+            console.error('Extension import from ZIP failed', request.status, request.statusText, text);
+            return false;
+        }
+
+        const response = await request.json();
+        toastr.success(t`Extension '${response.display_name}' has been imported successfully!`, t`Extension import successful`);
+        console.debug(`Extension "${response.display_name}" has been imported successfully at ${response.extensionPath} from a ZIP archive`);
+        await loadExtensionSettings({}, false, false);
+        await eventSource.emit(event_types.EXTENSION_SETTINGS_LOADED, response);
+
+        if (response.folderName) {
+            const extensionName = `third-party/${response.folderName}`;
+            await callExtensionHook(extensionName, 'install');
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Extension import from ZIP failed', error);
+        toastr.error(String(error), t`Import extension failed`);
+        return false;
+    }
+}
+
+/**
  * Loads extension settings from the app settings.
  * @param {object} settings App Settings
  * @param {boolean} versionChanged Is this a version change?
@@ -1796,7 +1864,6 @@ export async function loadExtensionSettings(settings, versionChanged, enableAuto
         Object.assign(extension_settings, settings.extension_settings);
     }
 
-    $('#extensions_url').val(extension_settings.apiUrl);
     $('#extensions_api_key').val(extension_settings.apiKey);
     $('#extensions_autoconnect').prop('checked', extension_settings.autoConnect);
     $('#extensions_notify_updates').prop('checked', extension_settings.notifyUpdates);
@@ -2318,6 +2385,37 @@ export async function initExtensions() {
     $(document).on('click', '.extensions_info .extension_block .btn_clean', onCleanClick);
     $(document).on('click', '.extensions_info .extension_block .btn_move', onMoveClick);
     $(document).on('click', '.extensions_info .extension_block .btn_branch', onBranchClick);
+
+    /**
+     * Handles the click event for the collapsed Extras API URL button.
+     *
+     * @listens #extensions_url_button#click - The click event of the '#extensions_url_button' element.
+     */
+    $('#extensions_url_button').on('click', openExtrasApiUrlPopup);
+
+    /**
+     * Handles the click event for the ZIP extension import button by opening the file browser.
+     *
+     * @listens #extension_import_zip_button#click - The click event of the '#extension_import_zip_button' element.
+     */
+    $('#extension_import_zip_button').on('click', () => $('#extension_import_zip_file').trigger('click'));
+
+    /**
+     * Handles the file selection event for the ZIP extension import.
+     *
+     * @listens #extension_import_zip_file#change - The change event of the '#extension_import_zip_file' element.
+     */
+    $('#extension_import_zip_file').on('change', async function () {
+        const file = this.files?.[0];
+        // Reset the value to allow re-selecting the same file
+        this.value = '';
+
+        if (!file) {
+            return;
+        }
+
+        await importExtensionFromZip(file);
+    });
 
     /**
      * Handles the click event for the third-party extension import button.

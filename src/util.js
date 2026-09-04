@@ -204,6 +204,44 @@ export function formatBytes(numBytes) {
 }
 
 /**
+ * Lists all entries of a ZIP archive without extracting them.
+ * @param {ArrayBufferLike|Buffer} archiveBuffer Buffer containing a ZIP archive
+ * @returns {Promise<Array<{fileName: string, isDirectory: boolean, externalAttributes: number}>|null>} List of entries, or null if the archive could not be opened
+ */
+export async function getZipEntryList(archiveBuffer) {
+    return await new Promise((resolve) => {
+        try {
+            const buffer = Buffer.isBuffer(archiveBuffer) ? archiveBuffer : Buffer.from(archiveBuffer);
+            yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
+                if (err) {
+                    console.warn(`Error opening ZIP file: ${err.message}`);
+                    return resolve(null);
+                }
+
+                /** @type {Array<{fileName: string, isDirectory: boolean, externalAttributes: number}>} */
+                const entries = [];
+                zipfile.readEntry();
+
+                zipfile.on('entry', (entry) => {
+                    entries.push({ fileName: entry.fileName, isDirectory: entry.fileName.endsWith('/'), externalAttributes: entry.externalFileAttributes >>> 0 });
+                    zipfile.readEntry();
+                });
+
+                zipfile.on('error', (zipError) => {
+                    console.warn('ZIP processing error', zipError);
+                    resolve(null);
+                });
+
+                zipfile.on('end', () => resolve(entries));
+            });
+        } catch (error) {
+            console.warn('Failed to process ZIP buffer', error);
+            resolve(null);
+        }
+    });
+}
+
+/**
  * Extracts a file with given extension from an ArrayBuffer containing a ZIP archive.
  * @param {ArrayBufferLike|Buffer} archiveBuffer Buffer containing a ZIP archive
  * @param {string} fileExtension File extension to look for

@@ -6,7 +6,7 @@ import sanitize from 'sanitize-filename';
 import { CheckRepoActions, default as simpleGit } from 'simple-git';
 
 import { PUBLIC_DIRECTORIES } from '../constants.js';
-import { getConfigValue, isValidUrl } from '../util.js';
+import { getConfigValue, isValidUrl, extractFilesFromZipBuffer, getZipEntryList, ensureDirectory, normalizeZipEntryPath } from '../util.js';
 import { createGitClient } from '../git/client.js';
 
 const gitBackend = getConfigValue('git.backend', 'auto');
@@ -15,6 +15,13 @@ const gitBackend = getConfigValue('git.backend', 'auto');
  * @type {Partial<import('simple-git').SimpleGitOptions>}
  */
 const OPTIONS = Object.freeze({ timeout: { block: 5 * 60 * 1000 } });
+
+/**
+ * Size limits for the ZIP extension import: a cap on the uploaded archive
+ * itself and a cap on the total decompressed size (zip bomb protection).
+ */
+const MAX_EXTENSION_ZIP_SIZE = 200 * 1024 * 1024;
+const MAX_EXTENSION_ZIP_UNCOMPRESSED_SIZE = 512 * 1024 * 1024;
 
 /**
  * This function extracts the extension information from the manifest file.
@@ -152,6 +159,220 @@ router.post('/install', async (request, response) => {
     } catch (error) {
         console.error('Importing extension failed', error);
         return response.status(500).send('Internal Server Error. Check the server logs for more details.');
+    }
+});
+
+/**
+ * HTTP POST handler function to install a third-party extension from an uploaded ZIP archive.
+ * The archive is received as multipart form data (field name 'avatar') via the global multer middleware.
+ *
+ * The archive is only accepted if it actually looks like an extension package:
+ * manifest.json at the archive root, declaring a display name and a "js" entry point
+ * script that is present in the archive. This keeps arbitrary ZIP files from being
+ * placed in the extensions directory, where they would be discovered and loaded as extensions.
+ *
+ * Imports are always user-scoped; an admin can move the extension to the global
+ * scope from the extension manager afterwards.
+ *
+ * @param {Object} request - HTTP Request object, multipart form data with an 'avatar' field containing a ZIP archive.
+ * @param {Object} response - HTTP Response object used to respond to the HTTP request.
+ *
+ * @returns {void}
+ */
+router.post('/install-zip', async (request, response) => {
+    const file = request.file;
+    let tempPath = file?.path ?? null;
+    let extensionPath = null;
+    let directoryCreated = false;
+
+    try {
+        if (!file) {
+            return response.status(400).send('Bad Request: No file uploaded.');
+        }
+
+        if (path.extname(file.originalname || '').toLowerCase() !== '.zip') {
+            return response.status(400).send('Bad Request: Please provide a ZIP archive.');
+        }
+
+        if (file.size > MAX_EXTENSION_ZIP_SIZE) {
+            return response.status(400).send(`Bad Request: The ZIP archive must be smaller than ${MAX_EXTENSION_ZIP_SIZE / 1024 / 1024} MB.`);
+        }
+
+        const archiveBuffer = await fs.promises.readFile(file.path);
+
+        const entries = await getZipEntryList(archiveBuffer);
+        if (!entries || entries.length === 0) {
+            return response.status(400).send('Bad Request: The uploaded file is not a valid ZIP archive or is empty.');
+        }
+
+        /** @type {string[]} */
+        const filePaths = [];
+
+        for (const entry of entries) {
+            // macOS archives ship junk metadata under __MACOSX/
+            if (entry.fileName.startsWith('__MACOSX') || entry.isDirectory) {
+                continue;
+            }
+
+            const normalized = normalizeZipEntryPath(entry.fileName);
+            // null means the entry would escape the extraction directory
+            if (!normalized) {
+                return response.status(400).send('Bad Request: The ZIP archive contains an unsafe entry path.');
+            }
+
+            // Windows drive-absolute paths ("C:/...") resolve outside the extension directory
+            if (/^[a-zA-Z]:/.test(normalized)) {
+                return response.status(400).send('Bad Request: The ZIP archive contains an unsafe entry path.');
+            }
+
+            // Unix symlink mode (S_IFLNK): such entries only store the target path as content
+            const unixMode = (entry.externalAttributes >>> 16) & 0o170000;
+            if (unixMode === 0o120000) {
+                return response.status(400).send('Bad Request: The ZIP archive contains symbolic links, which are not supported.');
+            }
+
+            filePaths.push(normalized);
+        }
+
+        if (filePaths.length === 0) {
+            return response.status(400).send('Bad Request: The ZIP archive is empty.');
+        }
+
+        // GitHub-style archives nest everything under a single top-level directory
+        const topSegments = new Set(filePaths.map(p => p.split('/')[0]));
+        const stripPrefix = topSegments.size === 1 && filePaths.some(p => p.includes('/')) ? `${[...topSegments][0]}/` : '';
+        const relativePaths = [...new Set(filePaths.map(p => p.slice(stripPrefix.length)).filter(p => p.length > 0))];
+
+        if (relativePaths.length === 0) {
+            return response.status(400).send('Bad Request: The ZIP archive is empty.');
+        }
+
+        if (!relativePaths.includes('manifest.json')) {
+            return response.status(400).send('Bad Request: manifest.json was not found at the archive root.');
+        }
+
+        const rawFolderName = stripPrefix
+            ? stripPrefix.slice(0, -1)
+            : path.basename(file.originalname, path.extname(file.originalname));
+        const folderName = sanitize(rawFolderName);
+        if (!folderName) {
+            return response.status(400).send('Bad Request: Could not determine the extension name from the ZIP archive.');
+        }
+
+        // make sure the third-party directory exists
+        if (!fs.existsSync(request.user.directories.extensions)) {
+            fs.mkdirSync(request.user.directories.extensions, { recursive: true });
+        }
+
+        extensionPath = path.join(request.user.directories.extensions, folderName);
+
+        if (fs.existsSync(extensionPath)) {
+            return response.status(409).send(`Directory already exists at ${extensionPath}`);
+        }
+
+        // Extraction matches on raw archive entry names, so map each raw name
+        // to its stripped (extension-root-relative) path
+        const strippedOf = new Map();
+        for (const p of filePaths) {
+            strippedOf.set(p, p.slice(stripPrefix.length));
+        }
+
+        const extracted = await extractFilesFromZipBuffer(archiveBuffer, [...strippedOf.keys()]);
+        if (!extracted || extracted.size < strippedOf.size) {
+            return response.status(400).send('Bad Request: Could not read the files from the ZIP archive.');
+        }
+
+        // Zip bomb protection: cap the total decompressed size
+        let uncompressedSize = 0;
+        for (const buffer of extracted.values()) {
+            uncompressedSize += buffer.length;
+        }
+        if (uncompressedSize > MAX_EXTENSION_ZIP_UNCOMPRESSED_SIZE) {
+            return response.status(400).send('Bad Request: The ZIP archive is too large when decompressed.');
+        }
+
+        let manifest;
+        try {
+            const manifestKey = [...strippedOf.keys()].find(k => strippedOf.get(k) === 'manifest.json');
+            manifest = JSON.parse(extracted.get(manifestKey)?.toString('utf8') ?? '');
+        } catch {
+            manifest = null;
+        }
+
+        if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+            return response.status(400).send('Bad Request: manifest.json is not a valid JSON object.');
+        }
+
+        // The package must identify itself
+        const displayName = manifest.display_name ?? manifest.name;
+        if (typeof displayName !== 'string' || !displayName.trim()) {
+            return response.status(400).send('Bad Request: manifest.json must provide a "display_name" or "name".');
+        }
+
+        // A loadable extension needs an entry point script, and it must be in the archive
+        const jsEntryPath = normalizeZipEntryPath(typeof manifest.js === 'string' ? manifest.js.trim() : '');
+        if (!jsEntryPath) {
+            return response.status(400).send('Bad Request: manifest.json must declare a "js" entry point script.');
+        }
+        if (!relativePaths.includes(jsEntryPath)) {
+            return response.status(400).send(`Bad Request: The "js" entry point "${manifest.js}" declared in manifest.json was not found in the archive.`);
+        }
+
+        // Same for the stylesheet, if one is declared
+        if (manifest.css !== undefined) {
+            const cssEntryPath = normalizeZipEntryPath(typeof manifest.css === 'string' ? manifest.css.trim() : '');
+            if (!cssEntryPath || !relativePaths.includes(cssEntryPath)) {
+                return response.status(400).send(`Bad Request: The "css" file "${manifest.css}" declared in manifest.json was not found in the archive.`);
+            }
+        }
+
+        // Write the extension files, with the target constrained to the extension directory
+        const rootDir = path.resolve(extensionPath);
+        ensureDirectory(extensionPath);
+        directoryCreated = true;
+
+        for (const [rawPath, buffer] of extracted) {
+            const relativePath = strippedOf.get(rawPath);
+            if (!relativePath) {
+                continue;
+            }
+            const targetPath = path.resolve(rootDir, relativePath);
+            if (targetPath !== rootDir && !targetPath.startsWith(rootDir + path.sep)) {
+                throw new Error(`Refusing to write outside the extension directory: ${relativePath}`);
+            }
+            ensureDirectory(path.dirname(targetPath));
+            fs.writeFileSync(targetPath, buffer);
+        }
+
+        console.info(`Extension has been installed at ${extensionPath} from a ZIP archive uploaded by ${request.user.profile.handle}`);
+
+        const { version, author, loading_order } = manifest;
+        return response.send({
+            version,
+            author,
+            loading_order,
+            display_name: manifest.display_name || manifest.name,
+            extensionPath,
+            folderName,
+        });
+    } catch (error) {
+        console.error('Importing extension from ZIP failed', error);
+
+        // Clean up a half-written extension directory, but never one that
+        // existed before this request (e.g. the 409 path)
+        if (directoryCreated && extensionPath) {
+            await fs.promises.rm(extensionPath, { recursive: true, force: true }).catch(() => { /* ignore */ });
+        }
+
+        return response.status(500).send('Internal Server Error. Check the server logs for more details.');
+    } finally {
+        // The multer temp file is no longer needed: either it was read into memory
+        // or the request failed before that
+        if (tempPath) {
+            try {
+                await fs.promises.unlink(tempPath);
+            } catch { /* ignore */ }
+        }
     }
 });
 
