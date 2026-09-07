@@ -1956,6 +1956,26 @@ export async function sendTextareaMessage() {
 }
 
 /**
+ * Backslash-escapes Markdown syntax characters so the Markdown processor renders
+ * the text literally instead of interpreting it as formatting.
+ * Backslashes are doubled first so the user's own escape sequences are preserved as typed.
+ * HTML tags are left untouched so markup in the message (e.g. status bars) keeps working.
+ * The processor decodes every escape back to the original character in the produced HTML.
+ * @param {string} text Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeMarkdownSyntax(text) {
+    return text
+        .split(/(<[^>]*>)/)
+        .map(part => part.startsWith('<') && part.endsWith('>')
+            ? part
+            : part
+                .replace(/\\/g, '\\\\')
+                .replace(/([*_`#~[\]!+=|.\->])/g, '\\$1'))
+        .join('');
+}
+
+/**
  * Formats the message text into an HTML string using Markdown and other formatting.
  * @param {string} mes Message text
  * @param {string} ch_name Character name
@@ -2029,13 +2049,17 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
         });
     }
 
+    // With "Forbid Markdown in user messages" enabled, the user's input is rendered literally,
+    // so the markdown auto-fixing steps below must not touch it either.
+    const forbidUserMarkdown = !isSystem && isUser && power_user.disable_user_markdown;
+
     // Convert nested same-delimiter emphasis to bold before any markdown fixing.
     // Must run before fixMarkdown which would strip the spaces that indicate nesting.
-    if (!isSystem) {
+    if (!isSystem && !forbidUserMarkdown) {
         mes = fixNestedEmphasis(mes);
     }
 
-    if (power_user.auto_fix_generated_markdown) {
+    if (power_user.auto_fix_generated_markdown && !forbidUserMarkdown) {
         mes = fixMarkdown(mes, true);
     }
 
@@ -2055,6 +2079,14 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
             mes = mes.replace(reasoningString, escapeHtml(reasoningString));
         }
     });
+
+    // Escape Markdown syntax characters so the user's input is rendered literally.
+    // The escapes are transient: the Markdown processor decodes them back to the
+    // original characters while building the HTML, so nothing downstream (sanitizer,
+    // DOM) ever sees the added backslashes.
+    if (forbidUserMarkdown) {
+        mes = escapeMarkdownSyntax(mes);
+    }
 
     if (!isSystem) {
         // Save double quotes in tags as a special character to prevent them from being encoded

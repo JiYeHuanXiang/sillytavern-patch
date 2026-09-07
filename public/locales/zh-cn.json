@@ -959,6 +959,8 @@
     "Auto-save Message Edits": "自动保存消息编辑",
     "Confirm message deletion": "删除消息前确认",
     "Auto-fix Markdown": "自动修复 Markdown",
+    "Show the Markdown characters you type in your own messages exactly as written, e.g. * or #, instead of interpreting them as formatting. Only affects your own messages; AI responses and character greetings are rendered as usual.": "在自己发送的消息中，*, # 等 Markdown 字符按原样显示，而不会被解析为格式。仅作用于你自己发送的消息；AI 回复和角色开场白不受影响。",
+    "Forbid Markdown in User Messages": "禁止转译",
     "Disallow embedded media from other domains in chat messages": "禁止在聊天消息中嵌入来自其他域的媒体。",
     "Forbid External Media": "禁止外部媒体",
     "Allow {{char}}: in bot messages": "在机器人消息中允许 {{char}}: ",
