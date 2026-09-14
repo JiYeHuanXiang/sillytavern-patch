@@ -2155,14 +2155,18 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
         mes = mes.replace(new RegExp(`(^|\n)${escapeRegex(ch_name)}:`, 'g'), '$1');
     }
 
+    // The patched rendering mode renders card-authored iframes as sandboxed previews,
+    // so the allowlist has to admit them; vanilla mode keeps upstream's tag/attr set.
+    const htmlPreviewEnabled = power_user.render_html_pages;
+
     /** @type {DOMPurify.Config} */
     const config = {
         RETURN_DOM: false,
         RETURN_DOM_FRAGMENT: false,
         RETURN_TRUSTED_TYPE: false,
         MESSAGE_SANITIZE: true,
-        ADD_TAGS: ['custom-style', 'iframe'],
-        ADD_ATTR: ['sandbox', 'allow', 'loading', 'data-preview-id', 'data-preview-html', 'data-needs-src'],
+        ADD_TAGS: htmlPreviewEnabled ? ['custom-style', 'iframe'] : ['custom-style'],
+        ADD_ATTR: htmlPreviewEnabled ? ['sandbox', 'allow', 'loading', 'data-preview-id', 'data-preview-html', 'data-needs-src'] : [],
         ...sanitizerOverrides,
     };
     mes = encodeStyleTags(mes);
@@ -2799,6 +2803,10 @@ export function appendMediaToMessage(mes, messageElement, scrollBehavior = SCROL
 
 /**
  * Detects whether a string looks like a complete HTML document.
+ * Must match only strings that START with a page: prose containing a fenced
+ * or embedded page has to stay a normal message (the code block still gets a
+ * manual preview button), otherwise messageFormatting would swallow the whole
+ * message into one preview.
  * @param {string} text The text to check
  * @returns {boolean} True if it appears to be a full HTML page
  */
@@ -2807,7 +2815,7 @@ function isFullHtmlPage(text) {
         return false;
     }
     const trimmed = text.trim().toLowerCase();
-    return trimmed.startsWith('<!doctype html>') || (trimmed.includes('<html') && trimmed.includes('</html>'));
+    return trimmed.startsWith('<!doctype html>') || (trimmed.startsWith('<html') && trimmed.includes('</html>'));
 }
 
 /**

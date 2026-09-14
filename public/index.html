@@ -5609,10 +5609,15 @@
                                     <input id="pin_styles" type="checkbox" />
                                     <small data-i18n="Pin greeting message styles">Pin greeting message styles</small>
                                 </label>
-                                <label class="checkbox_label" for="render_html_pages" title="Render complete HTML pages embedded in messages or code blocks as sandboxed previews.">
-                                    <input id="render_html_pages" type="checkbox" />
-                                    <small>将完整 HTML 页面渲染为沙盒预览</small>
-                                </label>
+                                <div>
+                                    <label for="render_html_pages">
+                                        <small>HTML 渲染模式</small>
+                                    </label>
+                                    <select id="render_html_pages" title="补丁版：完整 HTML 页面渲染为沙盒 iframe 预览，页面脚本可运行并能经 window.ST 访问酒馆上下文。原版：与上游一致，消息 HTML 只经 Markdown 与 DOMPurify 处理，脚本与 iframe 一律剥除。">
+                                        <option value="patch">补丁版：沙盒预览</option>
+                                        <option value="vanilla">原版：Markdown + DOMPurify</option>
+                                    </select>
+                                </div>
                                 <div class="inline-drawer wide100p flexFlowColumn">
                                     <div class="inline-drawer-toggle inline-drawer-header userSettingsInnerExpandable" title="Automatically reject and re-generate AI message based on configurable criteria." data-i18n="[title]Automatically reject and re-generate AI message based on configurable criteria">
                                         <b><span data-i18n="Auto-swipe">Auto-swipe</span></b>

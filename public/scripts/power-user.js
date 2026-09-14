@@ -1801,7 +1801,7 @@ export async function loadPowerUserSettings(settings, data) {
     $('#auto-load-chat-checkbox').prop('checked', power_user.auto_load_chat);
     $('#forbid_external_media').prop('checked', power_user.forbid_external_media);
     $('#pin_styles').prop('checked', power_user.pin_styles);
-    $('#render_html_pages').prop('checked', power_user.render_html_pages);
+    $('#render_html_pages').val(power_user.render_html_pages ? 'patch' : 'vanilla');
     $('#media_display').val(power_user.media_display);
     $('#image_overswipe').val(power_user.image_overswipe);
 
@@ -4127,8 +4127,9 @@ jQuery(() => {
     });
 
     $('#render_html_pages').on('input', function () {
-        power_user.render_html_pages = !!$(this).prop('checked');
+        power_user.render_html_pages = $(this).val() === 'patch';
         saveSettingsDebounced();
+        // Re-render the chat so live previews are torn down (or created) under the new mode.
         reloadCurrentChat();
     });
 

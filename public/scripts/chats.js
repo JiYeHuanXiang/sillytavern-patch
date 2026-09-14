@@ -1948,8 +1948,17 @@ export function addDOMPurifyHooks() {
         switch (data.attrName) {
             case 'class': {
                 if (data.attrValue) {
+                    // Classes of the sandboxed HTML preview UI only exist in the patched
+                    // rendering mode; vanilla mode keeps upstream's stricter mapping.
+                    const allowPreviewClasses = power_user.render_html_pages;
                     data.attrValue = data.attrValue.split(' ').map((v) => {
-                        if (v.startsWith('fa-') || v.startsWith('note-') || v === 'monospace' || v.startsWith('html-preview-') || v === 'code-block-actions' || v === 'code-copy' || v === 'code-preview') {
+                        if (v.startsWith('fa-') || v.startsWith('note-') || v === 'monospace') {
+                            return v;
+                        }
+
+                        const isPreviewClass = v.startsWith('html-preview-')
+                            || v === 'code-block-actions' || v === 'code-copy' || v === 'code-preview';
+                        if (allowPreviewClasses && isPreviewClass) {
                             return v;
                         }
 
