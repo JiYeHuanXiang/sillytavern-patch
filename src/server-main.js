@@ -234,6 +234,27 @@ app.get('/', cacheBuster.middleware, (request, response) => {
     return response.sendFile('index.html', { root: path.join(serverDirectory, 'public') });
 });
 
+// Host mobile UI: the index page with the mobile layer injected at runtime
+app.get('/mobile', cacheBuster.middleware, async (request, response) => {
+    if (shouldRedirectToLogin(request)) {
+        const query = request.url.split('?')[1];
+        const redirectUrl = query ? `/login?${query}` : '/login';
+        return response.redirect(redirectUrl);
+    }
+
+    try {
+        const indexHtml = await fs.promises.readFile(path.join(serverDirectory, 'public', 'index.html'), 'utf8');
+        const mobileHtml = indexHtml
+            .replace('<head>', '<head>\n    <base href="/">')
+            .replace('</head>', '    <link rel="stylesheet" href="mobile/mobile.css">\n</head>')
+            .replace('</body>', '    <script src="mobile/mobile-ui.js"></script>\n</body>');
+        return response.type('html').send(mobileHtml);
+    } catch (error) {
+        console.error('Failed to serve mobile UI:', error);
+        return response.sendStatus(500);
+    }
+});
+
 // Callback endpoint for OAuth PKCE flows (e.g. OpenRouter)
 app.get('/callback/:source?', (request, response) => {
     const source = request.params.source;

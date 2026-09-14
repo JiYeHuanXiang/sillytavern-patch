@@ -1,0 +1,178 @@
+/*
+  Mobile UI layer (served only via /mobile, injected by server-main.js).
+  body.st-mobile marks the page; body[data-st-layout] carries the user's
+  layout choice: a = WeChat classic, b = QQ drawer, c = immersive flow.
+
+  Layout A (v0.1): WeChat-style chat bubbles + bottom tab bar.
+  The engine's own drawer system stays authoritative — tabs only
+  toggle the existing drawer icons.
+*/
+
+/* ---------- bottom tab bar ----------
+   The engine's mobile styles set body{position:fixed}, which breaks
+   position:fixed anchoring for elements appended to body (measured: they
+   land above the viewport). Anchor with absolute + dvh instead. */
+#st-m-tabbar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100dvh - 54px - env(safe-area-inset-bottom));
+    bottom: auto;
+    z-index: 3999;
+    display: flex;
+    height: 54px;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: #f7f7f7;
+    border-top: 0.5px solid #d9d9de;
+}
+#st-m-tabbar .st-m-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 10.5px;
+    color: #7a7a7c;
+    background: none;
+    border: none;
+    padding: 0;
+}
+#st-m-tabbar .st-m-tab .st-m-ti { font-size: 21px; line-height: 1; }
+#st-m-tabbar .st-m-tab.on { color: #07c160; }
+
+/* reserve room above the tab bar */
+body.st-mobile[data-st-layout="a"] #sheld {
+    bottom: calc(54px + env(safe-area-inset-bottom)) !important;
+}
+body.st-mobile[data-st-layout="a"] #send_form {
+    bottom: calc(54px + env(safe-area-inset-bottom)) !important;
+}
+
+/* ---------- hide the engine top icon row (tabs replace it) ---------- */
+body.st-mobile[data-st-layout="a"] .drawer-icon {
+    display: none !important;
+}
+body.st-mobile[data-st-layout="a"] #top-bar {
+    display: none !important;
+}
+
+/* ---------- WeChat-style chat bubbles ---------- */
+body.st-mobile[data-st-layout="a"] #chat {
+    background: #ededed;
+}
+body.st-mobile[data-st-layout="a"] #chat .mes {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 12px !important;
+}
+body.st-mobile[data-st-layout="a"] #chat .mes .mes_text {
+    background: #fff !important;
+    border-radius: 10px !important;
+    padding: 9px 12px !important;
+    max-width: 84%;
+    margin-right: auto;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+body.st-mobile[data-st-layout="a"] #chat .mes.is_user .mes_text {
+    background: #95ec69 !important;
+    margin-left: auto;
+    margin-right: 0;
+}
+/* name row: small and subdued above the bubble */
+body.st-mobile[data-st-layout="a"] #chat .mes .ch_name {
+    font-size: 11.5px;
+    color: #9a9a9a;
+}
+
+/* ---------- session list page ("消息" tab home) ---------- */
+#st-m-list {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: calc(100dvh - 54px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    z-index: 3500;
+    background: #ededed;
+    -webkit-overflow-scrolling: touch;
+}
+body[data-st-m-view="list"] #st-m-list { display: block; }
+body[data-st-m-view="list"] #sheld { visibility: hidden; }
+
+.st-m-hdr {
+    height: 52px;
+    background: #ededed;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 0.5px solid #d9d9de;
+}
+.st-m-hdr-t { font-size: 16.5px; font-weight: 600; color: #191919; }
+#st-m-search {
+    height: 32px;
+    border-radius: 7px;
+    background: #fff;
+    border: none;
+    margin: 8px 12px;
+    padding: 0 10px;
+    font-size: 14px;
+    color: #191919;
+    width: calc(100% - 24px);
+    outline: none;
+}
+#st-m-search::placeholder { color: #b5b5b8; }
+.st-m-hint { text-align: center; color: #9a9a9a; font-size: 13px; padding: 24px 12px; }
+.st-m-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
+    background: #fff;
+    border: none;
+    text-align: left;
+}
+.st-m-row + .st-m-row { border-top: 0.5px solid #f0f0f2; }
+.st-m-avx {
+    width: 46px;
+    height: 46px;
+    border-radius: 6px;
+    background: #e8e8ee;
+    flex: none;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 23px;
+}
+.st-m-avx img { width: 100%; height: 100%; object-fit: cover; }
+.st-m-gavx { background: rgba(129, 140, 248, 0.15); }
+.st-m-rm { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.st-m-rn { font-size: 16px; color: #191919; }
+.st-m-rp { font-size: 13px; color: #9a9a9a; }
+.st-m-rt { font-size: 11px; color: #b2b2b2; align-self: flex-start; margin-top: 4px; flex: none; }
+.ellip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* back button while inside a conversation */
+#st-m-back {
+    display: none;
+    position: absolute;
+    top: calc(6px + env(safe-area-inset-top));
+    left: 8px;
+    z-index: 3600;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    border: 0.5px solid #d9d9de;
+    font-size: 24px;
+    line-height: 1;
+    color: #191919;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 2px;
+}
+body[data-st-m-view="chat"] #st-m-back { display: flex; }
