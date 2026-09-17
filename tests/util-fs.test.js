@@ -17,6 +17,9 @@ describe('getImages', () => {
     });
 
     function writeFile(name, mtimeMs = null) {
+        if (typeof name !== 'string' || name.length === 0 || name.includes('/') || name.includes('\\') || name.includes('..')) {
+            throw new Error('writeFile: fixture name must be a plain file name');
+        }
         const filePath = path.join(tmpDir, name);
         fs.writeFileSync(filePath, '');
         if (mtimeMs !== null) {

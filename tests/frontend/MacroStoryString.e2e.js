@@ -12,10 +12,16 @@ test.describe('MacroStoryString', () => {
     const defaultContextPresets = [];
 
     test.beforeAll(() => {
-        const contextPresetsPath = path.join(serverDirectory, 'default', 'content', 'presets', 'context');
-        const files = fs.readdirSync(contextPresetsPath).filter(f => path.extname(f).toLowerCase() === '.json');
+        const presetsRoot = path.resolve(serverDirectory, 'default', 'content', 'presets', 'context');
+        const files = fs.readdirSync(presetsRoot).filter(f => path.extname(f).toLowerCase() === '.json');
         for (const file of files) {
-            const fullPath = path.join(contextPresetsPath, file);
+            if (typeof file !== 'string' || file !== path.basename(file)) {
+                continue;
+            }
+            const fullPath = path.resolve(presetsRoot, file);
+            if (!fullPath.startsWith(presetsRoot + path.sep)) {
+                continue;
+            }
             const fileContent = fs.readFileSync(fullPath, 'utf-8');
             const preset = JSON.parse(fileContent);
             defaultContextPresets.push(preset);
