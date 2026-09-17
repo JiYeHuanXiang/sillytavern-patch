@@ -3724,6 +3724,19 @@
                                     <option value="" data-i18n="-- Connect to the API --">-- Connect to the API --</option>
                                 </select>
                             </div>
+                            <div class="deepseek_cache_section" style="margin-top: 12px;">
+                                <div id="deepseek_cache_diagnostics" style="display:none; margin-top: 8px; padding: 8px; background: var(--black30); border-radius: 4px;">
+                                    <div class="cache_stats" style="display: flex; gap: 16px; font-size: 13px;">
+                                        <span><span data-i18n="Cache Hit:">Cache Hit:</span> <strong id="cache_hit_tokens">0</strong> <span data-i18n="tokens">tokens</span></span>
+                                        <span><span data-i18n="Cache Miss:">Cache Miss:</span> <strong id="cache_miss_tokens">0</strong> <span data-i18n="tokens">tokens</span></span>
+                                        <span><span data-i18n="Hit Rate:">Hit Rate:</span> <strong id="cache_hit_rate">0%</strong></span>
+                                    </div>
+                                    <div id="cache_breakpoint_info" style="display:none; margin-top: 6px; font-size: 12px; color: var(--warning);">
+                                        <span data-i18n="Cache break at message #">Cache break at message #</span><span id="cache_breakpoint_index"></span>
+                                        <span data-i18n="(source: ">(source: </span><span id="cache_breakpoint_source"></span>)
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div id="opencodego_form" data-source="opencodego">
                             <h4 data-i18n="OpenCode Go API Key">OpenCode Go API Key</h4>
@@ -3889,6 +3902,18 @@
                             <h4 data-i18n="Available Models">Available Models</h4>
                             <div class="flex-container">
                                 <select id="model_custom_select" class="text_pole model_custom_select"></select>
+                            </div>
+                            <h4 data-i18n="Advanced Options">Advanced Options</h4>
+                            <div class="flex-container">
+                                <label for="custom_prompt_caching" class="checkbox_label marginTopBot5" title="Enable Anthropic-style Prompt Caching (ephemeral) for this custom endpoint">
+                                    <input id="custom_prompt_caching" type="checkbox" />
+                                    <span data-i18n="Enable Prompt Caching">Enable Prompt Caching</span>
+                                </label>
+                            </div>
+                            <div>
+                                <small>
+                                    <span data-i18n="Enable caching in config.yaml">You also need to enable caching in config.yaml for this feature to work.</span>
+                                </small>
                             </div>
                             <h4 data-i18n="Thinking Mode Type">Thinking Mode Type</h4>
                             <div class="flex-container">
@@ -7537,6 +7562,13 @@
                             </div>
                             <textarea id="completion_prompt_manager_popup_entry_form_prompt" class="text_pole" name="prompt" data-macros data-macros-autocomplete="always" data-macros-autocomplete-style="expanded" placeholder="The prompt to be sent." data-i18n="[placeholder]The prompt to be sent."></textarea>
                         </div>
+                        <div id="completion_prompt_manager_reasoning_content_block" class="completion_prompt_manager_popup_entry_form_control">
+                            <label for="completion_prompt_manager_popup_entry_form_reasoning_content">
+                                <span data-i18n="prompt_manager_reasoning_content">Reasoning Prefill</span>
+                            </label>
+                            <div class="text_muted" data-i18n="Reasoning content of the message. Only sent to APIs that accept it.">Reasoning content of the message. Only sent to APIs that accept it.</div>
+                            <textarea id="completion_prompt_manager_popup_entry_form_reasoning_content" class="text_pole" name="reasoning_content" data-macros data-macros-autocomplete="always" data-macros-autocomplete-style="expanded" placeholder="The reasoning content to be sent." data-i18n="[placeholder]The reasoning content to be sent."></textarea>
+                        </div>
                         <div class="completion_prompt_manager_popup_entry_form_footer">
                             <a id="completion_prompt_manager_popup_entry_form_close" title="Close" data-i18n="[title]close" class="fa-solid fa-close menu_button"></a>
                             <a id="completion_prompt_manager_popup_entry_form_reset" title="Reset" data-i18n="[title]reset" class="fa-solid fa-undo menu_button"></a>
@@ -7586,6 +7618,7 @@
                                 <div title="Copy" class="mes_button mes_copy fa-solid fa-copy " data-i18n="[title]Copy"></div>
                             </div>
                             <div data-tooltip="Click to open checkpoint chat&#10;Shift+Click to replace the existing checkpoint with a new one" class="mes_button mes_bookmark fa-solid fa-flag" data-i18n="[data-tooltip]Open checkpoint chat&#10;Shift+Click to replace the existing checkpoint with a new one"></div>
+                            <div title="View branch chats" class="mes_button mes_branches fa-solid fa-code-branch" data-i18n="[title]View branch chats"></div>
                             <div title="Edit" class="mes_button mes_edit fa-solid fa-pencil " data-i18n="[title]Edit"></div>
                         </div>
                         <div class="mes_edit_buttons">
@@ -8312,6 +8345,10 @@
             <a id="option_back_to_main">
                 <i class="fa-lg fa-solid fa-left-long"></i>
                 <span data-i18n="Back to parent chat">Back to parent chat</span>
+            </a>
+            <a id="option_branch_graph">
+                <i class="fa-lg fa-solid fa-diagram-project"></i>
+                <span data-i18n="Branch graph">Branch graph</span>
             </a>
             <a id="option_new_bookmark">
                 <i class="fa-lg fa-solid fa-flag"></i>
