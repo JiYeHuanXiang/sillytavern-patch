@@ -28,7 +28,7 @@ import {
 } from './group-chats.js';
 import { loader } from './action-loader.js';
 import { getLastMessageId } from './macros.js';
-import { Popup } from './popup.js';
+import { Popup, POPUP_TYPE, POPUP_RESULT } from './popup.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
 import { commonEnumProviders } from './slash-commands/SlashCommandCommonEnumsProvider.js';
@@ -37,10 +37,16 @@ import { createTagMapFromList } from './tags.js';
 import { renderTemplateAsync } from './templates.js';
 import { compressRequest } from './request-compression.js';
 import { t } from './i18n.js';
+import {
+    showBranchGraph as showBranchGraphModule,
+    updateBranchMetadataAfterRename,
+} from './branch-graph.js';
 
 import {
     getUniqueName,
     isTrueBoolean,
+    sortMoments,
+    timestampToMoment,
 } from './utils.js';
 
 const bookmarkNameToken = 'Checkpoint #';
@@ -223,6 +229,13 @@ export async function createBranch(mesId, { swipeId = null } = {}) {
     if (!branchChatSnapshot) {
         toastr.warning('Could not prepare the selected swipe for branching.', 'Branch creation failed');
         return;
+    }
+
+    // The branch chat must not inherit the parent's branch references in its .jsonl file.
+    for (const message of branchChatSnapshot) {
+        if (message?.extra?.branches) {
+            delete message.extra.branches;
+        }
     }
 
     if (selected_group) {
@@ -457,6 +470,9 @@ export async function branchChat(mesId, { swipeId = null } = {}) {
         return null;
     }
 
+    // Save the parent chat to persist the branches array
+    await saveChatConditional();
+
     await saveItemizedPrompts(fileName);
 
     if (selected_group) {
@@ -677,10 +693,135 @@ function registerBookmarksSlashCommands() {
     }));
 }
 
+/**
+ * Shows a popup with a list of branch chats for a given message.
+ * @param {number} mesId - The message ID that has branches
+ */
+async function showBranchList(mesId) {
+    const message = chat[mesId];
+    if (!message?.extra?.branches || !Array.isArray(message.extra.branches) || message.extra.branches.length === 0) {
+        toastr.info('This message has no branch chats.', 'No branches found');
+        return;
+    }
+
+    const branchNames = message.extra.branches;
+
+    try {
+        showLoader();
+
+        // Fetch all chats to get info about the branches
+        const response = await fetch('/api/chats/search', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                query: '',
+                avatar_url: selected_group ? null : characters[this_chid]?.avatar,
+                group_id: selected_group || null,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch chat list');
+        }
+
+        const allChats = await response.json();
+
+        // Filter to only the branches we care about
+        const branchChats = allChats.filter(chat => branchNames.includes(chat.file_name));
+
+        if (branchChats.length === 0) {
+            const result = await Popup.show.confirm(
+                'All branch chats appear to have been deleted.',
+                'Would you like to clean up the branch metadata from this message?',
+            );
+            if (result) {
+                // Clean up the branch metadata
+                delete message.extra.branches;
+                await saveChatConditional();
+            }
+            return;
+        }
+
+        // Sort by last message date (most recent first)
+        branchChats.sort((a, b) => sortMoments(timestampToMoment(a.last_mes), timestampToMoment(b.last_mes)));
+
+        // Prepare data for template (don't escape - we'll use .text() to set content safely)
+        const branches = branchChats.map(branch => {
+            const momentDate = timestampToMoment(branch.last_mes);
+            return {
+                file_name: branch.file_name,
+                formattedDate: momentDate.isValid() ? momentDate.format('lll') : 'Unknown date',
+                preview: branch.preview_message || '(No messages)',
+                message_count: branch.message_count || 0,
+            };
+        });
+
+        const branchListHTML = await renderTemplateAsync('branchList', { branches });
+
+        // Show the popup
+        const popup = new Popup(branchListHTML, POPUP_TYPE.TEXT, '', {
+            okButton: false,
+            cancelButton: 'Close',
+            onOpen: () => {
+                // Use .text() to safely set content after popup is in DOM (like "Manage chat files" does)
+                $('.branch-list-item').each(function () {
+                    const branchIndex = parseInt($(this).attr('data-branch-index'));
+                    const branch = branches[branchIndex];
+                    $(this).attr('data-file-name', branch.file_name);
+                    $(this).find('.branch-name-text').text(branch.file_name);
+                    $(this).find('.branch-preview-text').text(branch.preview);
+                });
+            },
+        });
+
+        const result = await popup.show();
+
+        // If user cancelled or closed the popup, do nothing
+        // Note: result can be 0 (first item), so we need to check for null/undefined or negative button explicitly
+        if (result === POPUP_RESULT.CANCELLED || result === null || result === undefined) {
+            return;
+        }
+
+        // Get the selected branch by index
+        const selectedBranch = branches[result];
+        if (!selectedBranch) {
+            console.error('Invalid branch selection:', result);
+            return;
+        }
+
+        try {
+            showLoader();
+            if (selected_group) {
+                await openGroupChat(selected_group, selectedBranch.file_name);
+            } else {
+                await openCharacterChat(selectedBranch.file_name);
+            }
+        } finally {
+            await hideLoader();
+        }
+    } catch (error) {
+        console.error('Error showing branch list:', error);
+        toastr.error('Failed to load branch list. Please try again.', 'Error');
+    } finally {
+        await hideLoader();
+    }
+}
+
+/**
+ * Builds a tree of all related chats (parents and children) and displays it in a graph.
+ */
+async function showBranchGraph() {
+    await showBranchGraphModule();
+}
+
+// Re-export for backward compatibility
+export { updateBranchMetadataAfterRename };
+
 export function initBookmarks() {
     $('#option_new_bookmark').on('click', saveBookmarkMenu);
     $('#option_back_to_main').on('click', backToMainChat);
     $('#option_convert_to_group').on('click', convertSoloToGroupChat);
+    $('#option_branch_graph').on('click', showBranchGraph);
 
     $(document).on('click', '.select_chat_block, .mes_bookmark', async function (e) {
         // If shift is held down, we are not following the bookmark, but creating a new one
@@ -730,6 +871,13 @@ export function initBookmarks() {
         const mesId = $(this).closest('.mes').attr('mesid');
         if (mesId !== undefined) {
             await branchChat(Number(mesId));
+        }
+    });
+
+    $(document).on('click', '.mes_branches', async function () {
+        const mesId = $(this).closest('.mes').attr('mesid');
+        if (mesId !== undefined) {
+            await showBranchList(Number(mesId));
         }
     });
 
