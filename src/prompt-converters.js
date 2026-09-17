@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { CHARACTER_NAMES_BEHAVIOR } from './constants.js';
 import { getConfigValue, tryParse } from './util.js';
 
 const PROMPT_PLACEHOLDER = getConfigValue('promptPlaceholder', 'Let\'s get started.');
@@ -47,9 +48,12 @@ const enableThoughtSignatures = !!getConfigValue('gemini.thoughtSignatures', tru
  * @returns {PromptNames} Prompt names
  */
 export function getPromptNames(request) {
+    // "Never add character name prefixes" also applies to the prefixes the
+    // server adds while converting or post-processing the prompt.
+    const addNames = Number(request.body.names_behavior) !== CHARACTER_NAMES_BEHAVIOR.NONE;
     return {
-        charName: String(request.body.char_name || ''),
-        userName: String(request.body.user_name || ''),
+        charName: addNames ? String(request.body.char_name || '') : '',
+        userName: addNames ? String(request.body.user_name || '') : '',
         groupNames: Array.isArray(request.body.group_names) ? request.body.group_names.map(String) : [],
         startsWithGroupName: function (message) {
             return this.groupNames.some(name => message.startsWith(`${name}: `));
@@ -1390,7 +1394,9 @@ export function embedOpenRouterMedia(messages, { audio = true, video = true } = 
 }
 
 /**
- * Adds a dummy reasoning_content field to messages with tool calls for DeepSeek reasoner.
+ * Adds reasoning_content field to messages with tool calls for DeepSeek thinking mode.
+ * If the message has stored reasoning from a previous response, it is used; otherwise
+ * an empty string is set. The non-standard `reasoning` field is removed from the message.
  * @param {object[]} messages Array of messages
  * @returns {void}
  */
@@ -1400,11 +1406,15 @@ export function addReasoningContentToToolCalls(messages) {
     }
 
     for (const message of messages) {
-        if (!Array.isArray(message.tool_calls) || 'reasoning_content' in message) {
+        if (!Array.isArray(message.tool_calls)) {
             continue;
         }
 
-        message.reasoning_content = '';
+        if (!message.reasoning_content) {
+            message.reasoning_content = message.reasoning ?? '';
+        }
+
+        delete message.reasoning;
     }
 }
 

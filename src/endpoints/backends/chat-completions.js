@@ -1124,6 +1124,7 @@ async function sendDeepSeekRequest(request, response) {
 
         const processedMessages = addAssistantPrefix(postProcessPrompt(request.body.messages, PROMPT_PROCESSING_TYPE.SEMI_TOOLS, getPromptNames(request)), bodyParams.tools, 'prefix');
         addReasoningContentToToolCalls(processedMessages);
+        processedMessages.forEach(msg => delete msg.source);
 
         if (request.body.include_reasoning && request.body.reasoning_effort) {
             bodyParams['reasoning_effort'] = request.body.reasoning_effort;
@@ -2637,6 +2638,28 @@ router.post('/generate', async function (request, response) {
             if (!isTextCompletion && bodyParams.logprobs > 0) {
                 bodyParams.top_logprobs = bodyParams.logprobs;
                 bodyParams.logprobs = true;
+            }
+
+            if (request.body.custom_prompt_caching && Array.isArray(request.body.messages)) {
+                const customModel = String(request.body.model).toLowerCase();
+                const isCustomClaude = customModel.includes('claude');
+
+                // if the model includes "claude", we use the full Anthropic special logic
+                if (isCustomClaude) {
+                    if (enableSystemPromptCache) {
+                        cachingSystemPromptForOpenRouter(request.body.messages, cacheTTL);
+                    }
+                    if (cachingAtDepth !== -1) {
+                        cachingAtDepthForOpenRouterClaude(request.body.messages, cachingAtDepth, cacheTTL);
+                    }
+                }
+                // if the model is not Claude, we use the simple standard without TTL
+                else {
+                    const enableGeminiSystemPromptCache = getConfigValue('gemini.enableSystemPromptCache', false, 'boolean');
+                    if (enableGeminiSystemPromptCache) {
+                        cachingSystemPromptForOpenRouter(request.body.messages);
+                    }
+                }
             }
 
             mergeObjectWithYaml(bodyParams, request.body.custom_include_body);
