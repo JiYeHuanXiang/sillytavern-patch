@@ -27,6 +27,7 @@ import {
     selected_group,
 } from './group-chats.js';
 import { loader } from './action-loader.js';
+import { hideLoader, showLoader } from './loader.js';
 import { getLastMessageId } from './macros.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from './popup.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';

@@ -2652,9 +2652,8 @@ router.post('/generate', async function (request, response) {
                     if (cachingAtDepth !== -1) {
                         cachingAtDepthForOpenRouterClaude(request.body.messages, cachingAtDepth, cacheTTL);
                     }
-                }
-                // if the model is not Claude, we use the simple standard without TTL
-                else {
+                } else {
+                    // The model is not Claude: use the simple standard without TTL
                     const enableGeminiSystemPromptCache = getConfigValue('gemini.enableSystemPromptCache', false, 'boolean');
                     if (enableGeminiSystemPromptCache) {
                         cachingSystemPromptForOpenRouter(request.body.messages);

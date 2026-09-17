@@ -593,7 +593,7 @@ export async function showBranchGraph() {
         }
 
         const chatMap = await fetchAllChats();
-        const { relatedChats, metadataCache, rootChatName } = await traverseBranchTree(currentChatName, chatMap);
+        const { metadataCache, rootChatName } = await traverseBranchTree(currentChatName, chatMap);
 
         const tree = buildTree(rootChatName, chatMap, metadataCache);
 
