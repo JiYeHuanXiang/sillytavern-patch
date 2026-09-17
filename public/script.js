@@ -133,6 +133,7 @@ import {
     initBookmarks,
     showBookmarksButtons,
     updateBookmarkDisplay,
+    updateBranchMetadataAfterRename,
 } from './scripts/bookmarks.js';
 
 import {
@@ -1490,7 +1491,7 @@ export function getCharacterSource(chId = this_chid) {
     return '';
 }
 
-export async function getCharacters() {
+export async function getCharacters(retry = false) {
     const response = await fetch('/api/characters/all', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -1498,8 +1499,16 @@ export async function getCharacters() {
     });
     if (response.ok) {
         const previousAvatar = this_chid !== undefined ? characters[this_chid]?.avatar : null;
-        characters.splice(0, characters.length);
-        const getData = await response.json();
+        characters.length = 0;
+        let getData;
+
+        try {
+            getData = await response.json();
+        } catch (error) {
+            console.error('Failed to parse characters:', error);
+            return retry ? getCharacters(true) : undefined;
+        }
+
         for (let i = 0; i < getData.length; i++) {
             characters[i] = getData[i];
             characters[i].name = DOMPurify.sanitize(characters[i].name);
@@ -1535,6 +1544,8 @@ export async function getCharacters() {
         if (errorData?.overflow) {
             await Popup.show.text(t`Character data length limit reached`, t`To resolve this, set "performance.lazyLoadCharacters" to "true" in config.yaml and restart the server.`);
         }
+
+        return retry ? getCharacters(true) : undefined;
     }
 }
 
@@ -3165,6 +3176,7 @@ export function updateMessageElement(mes, { messageId = chat.length - 1, message
     const timestamp = momentDate.isValid() ? momentDate.format('LL LT') : '';
     const messageHTML = getMessageTextHTML(mes, { messageId });
     const bookmarkLink = mes?.extra?.bookmark_link;
+    const hasBranches = Array.isArray(mes?.extra?.branches) && mes.extra.branches.length > 0;
     const tokenCount = mes.extra?.token_count;
     const { timerValue, timerTitle } = formatGenerationTimer(mes.gen_started, mes.gen_finished, mes.extra?.token_count, mes.extra?.reasoning_duration, mes.extra?.time_to_first_token);
 
@@ -3175,6 +3187,7 @@ export function updateMessageElement(mes, { messageId = chat.length - 1, message
         'is_user': mes.is_user,
         'is_system': !!mes.is_system,
         'bookmark_link': bookmarkLink,
+        'has_branches': hasBranches ? 'true' : '',
         'force_avatar': !!mes.force_avatar,
         'timestamp': timestamp,
         // ...(type ?? { type }),
@@ -11666,6 +11679,8 @@ export async function renameGroupOrCharacterChat({ characterId, groupId, oldFile
             $('#selected_chat_pole').val(characters[characterId].chat);
             await createOrEditCharacter();
         }
+
+        await updateBranchMetadataAfterRename(oldFileName, newFileName);
 
         if (currentChatId) {
             await reloadCurrentChat();

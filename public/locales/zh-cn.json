@@ -2104,7 +2104,6 @@
     "ext_regex_move_to_global": "移至全局",
     "ext_regex_move_to_preset": "移至预设",
     "ext_regex_move_to_scoped": "移至局部",
-    "Export": "导出",
     "ext_regex_presets": "正则预设",
     "ext_regex_presets_desc": "可以轻松保存并切换多组正则开关状态。",
     "ext_regex_preset_create": "创建新预设",
@@ -3707,5 +3706,19 @@
     "Visible messages": "可见消息数",
     "Exported all perspectives.": "已导出所有视角。",
     "Exported ${0}'s perspective (${1} messages).": "已导出 ${0} 的视角（${1} 条消息）。",
-    "msgs": "条"
+    "msgs": "条",
+    "Advanced Options": "高级选项",
+    "Enable Prompt Caching": "启用提示词缓存",
+    "Enable caching in config.yaml": "此功能还需要在 config.yaml 中启用缓存。",
+    "prompt_manager_reasoning_content": "思考预填充",
+    "Reasoning content of the message. Only sent to APIs that accept it.": "消息的思考内容。仅发送给支持该字段的 API。",
+    "The reasoning content to be sent.": "要发送的思考内容。",
+    "View branch chats": "查看分支聊天",
+    "Branch graph": "分支图谱",
+    "Cache Hit:": "缓存命中:",
+    "Cache Miss:": "缓存未命中:",
+    "Hit Rate:": "命中率:",
+    "tokens": "tokens",
+    "Cache break at message #": "缓存断点位于消息 #",
+    "(source: ": "(来源: "
 }
