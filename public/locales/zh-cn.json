@@ -961,6 +961,8 @@
     "Auto-fix Markdown": "自动修复 Markdown",
     "Show the Markdown characters you type in your own messages exactly as written, e.g. * or #, instead of interpreting them as formatting. Only affects your own messages; AI responses and character greetings are rendered as usual.": "在自己发送的消息中，*, # 等 Markdown 字符按原样显示，而不会被解析为格式。仅作用于你自己发送的消息；AI 回复和角色开场白不受影响。",
     "Forbid Markdown in User Messages": "禁止转译",
+    "Hide card-appended preset action choices and their lead-in prompts (e.g. '1. Continue talking 2. Leave the scene' or 'A. Move on B. Turn right') in displayed AI messages and messages sent in prompts. Chat files are not modified.": "在 AI 消息的显示与发送给模型的提示词中，隐藏角色卡附带的预设行动选项及其引导提示（如“1.继续交谈 2.离开现场”“A.继续前进 B.向右转向”）。不会修改聊天文件。",
+    "Filter Preset Action Choices": "过滤预设行动选项",
     "Disallow embedded media from other domains in chat messages": "禁止在聊天消息中嵌入来自其他域的媒体。",
     "Forbid External Media": "禁止外部媒体",
     "Allow {{char}}: in bot messages": "在机器人消息中允许 {{char}}: ",

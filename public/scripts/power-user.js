@@ -121,6 +121,7 @@ export const power_user = {
     pin_examples: false,
     strip_examples: false,
     trim_sentences: false,
+    filter_preset_actions: false,
     always_force_name2: false,
     user_prompt_bias: '',
     show_user_prompt_bias: true,
@@ -1701,6 +1702,7 @@ export async function loadPowerUserSettings(settings, data) {
     $('#collapse-newlines-checkbox').prop('checked', power_user.collapse_newlines);
     $('#always-force-name2-checkbox').prop('checked', power_user.always_force_name2);
     $('#trim_sentences_checkbox').prop('checked', power_user.trim_sentences);
+    $('#filter_preset_actions_checkbox').prop('checked', power_user.filter_preset_actions);
     $('#disable_group_trimming').prop('checked', power_user.disable_group_trimming);
     $('#markdown_escape_strings').val(power_user.markdown_escape_strings);
     $('#fast_ui_mode').prop('checked', power_user.fast_ui_mode);
@@ -3237,6 +3239,11 @@ jQuery(() => {
     // if trim sentences is unchecked, include newline must be unchecked
     $('#trim_sentences_checkbox').on('change', function () {
         power_user.trim_sentences = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#filter_preset_actions_checkbox').on('change', function () {
+        power_user.filter_preset_actions = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 

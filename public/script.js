@@ -195,6 +195,8 @@ import {
 } from './scripts/utils.js';
 import { debounce_timeout, GENERATION_TYPE_TRIGGERS, IGNORE_SYMBOL, inject_ids, MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE, OVERSWIPE_BEHAVIOR, SCROLL_BEHAVIOR, SWIPE_DIRECTION, SWIPE_SOURCE, SWIPE_STATE } from './scripts/constants.js';
 
+import { stripPresetActions } from './scripts/preset-actions.js';
+
 import { cancelDebouncedMetadataSave, doDailyExtensionUpdatesCheck, extension_settings, initExtensions, loadExtensionSettings, runGenerationInterceptors } from './scripts/extensions.js';
 import { COMMENT_NAME_DEFAULT, CONNECT_API_MAP, executeSlashCommandsOnChatInput, initDefaultSlashCommands, initSlashCommandAutoComplete, isExecutingCommandsFromChatInput, pauseScriptExecution, stopScriptExecution, UNIQUE_APIS } from './scripts/slash-commands.js';
 import { initMacroAutoComplete } from './scripts/autocomplete/MacroAutoComplete.js';
@@ -1703,6 +1705,13 @@ export async function printMessages() {
     delay(debounce_timeout.short).then(() => scrollOnMediaLoad());
 }
 
+// Re-render the chat when the preset action filter is toggled (the value itself is saved by power-user.js)
+$('#filter_preset_actions_checkbox').on('change', async function () {
+    if (chat.length > 0) {
+        await printMessages();
+    }
+});
+
 /**
  * Visually updates all chat messages including and after index by removing them, then adding them.
  * @param {object} [options] Options
@@ -2027,6 +2036,11 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
     const replacedPromptBias = power_user.user_prompt_bias && substituteParams(power_user.user_prompt_bias);
     if (!power_user.show_user_prompt_bias && ch_name && !isUser && !isSystem && replacedPromptBias && mes.startsWith(replacedPromptBias)) {
         mes = mes.slice(replacedPromptBias.length);
+    }
+
+    // Hide card-appended preset action choices (e.g. "1. Continue talking 2. Leave the scene") from AI messages
+    if (!isSystem && !isUser && !isReasoning && power_user.filter_preset_actions) {
+        mes = stripPresetActions(mes);
     }
 
     if (!isSystem) {
@@ -5086,6 +5100,11 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
 
         let regexedMessage = getRegexedString(message, regexType, options);
         regexedMessage = await appendFileContent(chatItem, regexedMessage);
+
+        // Strip card-appended preset action choices from AI messages sent in prompts
+        if (power_user.filter_preset_actions && !chatItem.is_user && !Array.isArray(chatItem?.extra?.tool_invocations)) {
+            regexedMessage = stripPresetActions(regexedMessage);
+        }
 
         const titles = [];
         if (chatItem?.extra?.append_title && chatItem?.extra?.title) {
