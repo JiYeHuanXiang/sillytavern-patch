@@ -14,6 +14,7 @@ import {
     extension_prompt_roles,
     extension_prompt_types,
     Generate,
+    getCurrentChatId,
     getExtensionPrompt,
     getExtensionPromptMaxDepth,
     getMediaDisplay,
@@ -404,7 +405,7 @@ export const settingsToUpdate = {
     prompts: ['', 'prompts', false, false],
     prompt_order: ['', 'prompt_order', false, false],
     show_external_models: ['#openai_show_external_models', 'show_external_models', true, true],
-    proxy_password: ['#openai_proxy_password', 'proxy_password', false, true],
+    proxy_password: ['#openai_proxy_access_key', 'proxy_password', false, true],
     assistant_prefill: ['#claude_assistant_prefill', 'assistant_prefill', false, false],
     assistant_impersonation: ['#claude_assistant_impersonation', 'assistant_impersonation', false, false],
     use_sysprompt: ['#use_sysprompt', 'use_sysprompt', true, false],
@@ -464,10 +465,10 @@ const default_settings = {
     personality_format: default_personality_format,
     sort_models: 'alphabetically',
     group_models: false,
-    openai_model: 'gpt-4-turbo',
-    claude_model: 'claude-sonnet-4-5',
-    google_model: 'gemini-2.5-pro',
-    vertexai_model: 'gemini-2.5-pro',
+    openai_model: 'gpt-5.6-terra',
+    claude_model: 'claude-sonnet-5',
+    google_model: 'gemini-3.7-flash',
+    vertexai_model: 'gemini-3.7-flash',
     ai21_model: 'jamba-large',
     mistralai_model: 'mistral-large-latest',
     cohere_model: 'command-r-plus',
@@ -1686,6 +1687,21 @@ export async function prepareOpenAIMessages({
 }
 
 /**
+ * Extracts a human-readable message from a Chat Completion error response.
+ * Providers can return an error object without a message field, or the error as
+ * a plain string. statusText is only used for non-2xx responses, since for an
+ * HTTP 200 carrying an error payload it is just "OK" (#5647).
+ * @param {object} data Parsed response body
+ * @param {Response} response Fetch response
+ * @returns {string} Error message to display and throw
+ */
+function getChatCompletionErrorMessage(data, response) {
+    const error = data?.error ?? data?.detail?.error;
+    const message = typeof error === 'string' ? error : (error?.message || error?.code || error?.type);
+    return String(message || (!response.ok && response.statusText) || t`Unknown error`);
+}
+
+/**
  * Handles errors during streaming requests.
  * @param {Response} response
  * @param {string} decoded - response text or decoded stream data
@@ -1707,7 +1723,7 @@ export function tryParseStreamingError(response, decoded, { quiet = false } = {}
         // if trying to fix "[object Object]" displayed to users, start here
 
         if (data.error) {
-            !quiet && toastr.error(data.error.message || response.statusText, 'Chat Completion API');
+            !quiet && toastr.error(getChatCompletionErrorMessage(data, response), 'Chat Completion API');
             throw new Error(data);
         }
 
@@ -1717,7 +1733,7 @@ export function tryParseStreamingError(response, decoded, { quiet = false } = {}
         }
 
         if (data.detail) {
-            !quiet && toastr.error(data.detail?.error?.message || response.statusText, 'Chat Completion API');
+            !quiet && toastr.error(getChatCompletionErrorMessage(data, response), 'Chat Completion API');
             throw new Error(data);
         }
     } catch {
@@ -2399,14 +2415,12 @@ function saveModelList(data) {
 
     if (oai_settings.chat_completion_source === chat_completion_sources.FIREWORKS) {
         $('#model_fireworks_select').empty();
+        model_list.sort((a, b) => (a?.name || a?.id || '').localeCompare(b?.name || b?.id || ''));
         model_list.forEach((model) => {
-            if (!model?.supports_chat) {
-                return;
-            }
             $('#model_fireworks_select').append(
                 $('<option>', {
                     value: model.id,
-                    text: model.id,
+                    text: model.name || model.id,
                 }));
         });
 
@@ -2697,6 +2711,7 @@ function getReasoningEffort(settings = null, model = null) {
         chat_completion_sources.DEEPSEEK,
         chat_completion_sources.INFERSIA,
         chat_completion_sources.OPENCODEGO,
+        chat_completion_sources.FIREWORKS,
     ];
 
     if (!reasoningEffortSources.includes(settings.chat_completion_source)) {
@@ -2710,6 +2725,9 @@ function getReasoningEffort(settings = null, model = null) {
                     return undefined;
                 case reasoning_effort_types.disabled:
                     return reasoning_effort_types.disabled;
+                case reasoning_effort_types.min:
+                case reasoning_effort_types.low:
+                    return reasoning_effort_types.low;
                 case reasoning_effort_types.max:
                     return reasoning_effort_types.max;
                 default:
@@ -2726,6 +2744,17 @@ function getReasoningEffort(settings = null, model = null) {
                     return 'low';
                 case reasoning_effort_types.max:
                     return /deepseek-v4/.test(model) ? 'max' : 'high';
+                default:
+                    return settings.reasoning_effort;
+            }
+        }
+
+        if (settings.chat_completion_source === chat_completion_sources.FIREWORKS) {
+            switch (settings.reasoning_effort) {
+                case reasoning_effort_types.auto:
+                    return undefined;
+                case reasoning_effort_types.min:
+                    return reasoning_effort_types.low;
                 default:
                     return settings.reasoning_effort;
             }
@@ -2769,6 +2798,10 @@ function getReasoningEffort(settings = null, model = null) {
 
                 return reasoning_effort_types.low;
             case reasoning_effort_types.max:
+                if ([chat_completion_sources.OPENAI, chat_completion_sources.AZURE_OPENAI].includes(settings.chat_completion_source)
+                    && /^gpt-6-astra/.test(model)) {
+                    return reasoning_effort_types.max;
+                }
                 if ([chat_completion_sources.OPENAI, chat_completion_sources.AZURE_OPENAI].includes(settings.chat_completion_source)
                     && /^gpt-5\.6/.test(model)) {
                     // GPT-5.6 reserves "max" effort for the Responses API.
@@ -2879,6 +2912,20 @@ export async function createGenerationParameters(settings, model, type, messages
         throw new Error('messages must be an array');
     }
     messages = messages.filter(msg => msg && typeof msg === 'object');
+
+    // DeepSeek only accepts image blocks in user messages. Media can also be
+    // attached to system and assistant messages by the shared inlining path.
+    const isDeepSeekVisionModel = typeof model === 'string' && model.toLowerCase().includes('deepseek-v4-flash-vision-exp');
+    if (isDeepSeekVisionModel) {
+        messages = messages.flatMap((message) => {
+            if (!['system', 'assistant'].includes(message.role) || !Array.isArray(message.content)) {
+                return [message];
+            }
+
+            const content = message.content.filter(block => block?.type !== 'image_url');
+            return content.length > 0 ? [{ ...message, content }] : [];
+        });
+    }
 
     // "OpenAI-like" sources
     const gptSources = [
@@ -3073,6 +3120,10 @@ export async function createGenerationParameters(settings, model, type, messages
         generate_data.nanogpt_payg_override = settings.nanogpt_payg_override;
     }
 
+    if (settings.chat_completion_source === chat_completion_sources.FIREWORKS && type !== 'quiet') {
+        generate_data.chat_id = getCurrentChatId();
+    }
+
     if ([chat_completion_sources.MAKERSUITE, chat_completion_sources.VERTEXAI].includes(settings.chat_completion_source)) {
         const stopStringsLimit = 5;
         generate_data.top_k = Number(settings.top_k_openai);
@@ -3093,9 +3144,9 @@ export async function createGenerationParameters(settings, model, type, messages
     if (settings.chat_completion_source === chat_completion_sources.CUSTOM) {
         generate_data.custom_url = settings.custom_url;
         generate_data.custom_prompt_caching = settings.custom_prompt_caching;
-        generate_data.custom_include_body = settings.custom_include_body;
-        generate_data.custom_exclude_body = settings.custom_exclude_body;
-        generate_data.custom_include_headers = settings.custom_include_headers;
+        generate_data.custom_include_body = substituteParams(settings.custom_include_body);
+        generate_data.custom_exclude_body = substituteParams(settings.custom_exclude_body);
+        generate_data.custom_include_headers = substituteParams(settings.custom_include_headers);
         generate_data.custom_thinking_mode_type = settings.custom_thinking_mode_type;
     }
 
@@ -3268,17 +3319,26 @@ export async function createGenerationParameters(settings, model, type, messages
         }
     }
 
-    // Claude Fable models removed sampling parameters and reject them with HTTP 400,
+    if (gptSources.includes(settings.chat_completion_source) && /gpt-6-astra/.test(model)) {
+        generate_data.max_completion_tokens = generate_data.max_tokens;
+        delete generate_data.max_tokens;
+        delete generate_data.temperature;
+        delete generate_data.top_p;
+        delete generate_data.logprobs;
+        delete generate_data.top_logprobs;
+    }
+
+    // Claude Fable / Claude 5 models removed sampling parameters and reject them with HTTP 400,
     // including via OpenAI-compatible proxies. Unanchored to also match prefixed ids
-    // like 'anthropic/claude-fable-5'.
-    if (/claude-fable/.test(model)) {
+    // like 'anthropic/claude-fable-5' or 'anthropic/claude-opus-5'.
+    if (/claude-(fable|opus-5|sonnet-5)/.test(model)) {
         delete generate_data.temperature;
         delete generate_data.top_p;
         delete generate_data.top_k;
         delete generate_data.frequency_penalty;
         delete generate_data.presence_penalty;
         // Keep reasoning_effort for the native Claude source, where the backend maps it to
-        // adaptive thinking; proxies may translate it into a thinking budget that Fable rejects.
+        // adaptive thinking; proxies may translate it into a thinking budget that these models reject.
         if (settings.chat_completion_source !== chat_completion_sources.CLAUDE) {
             delete generate_data.reasoning_effort;
         }
@@ -3400,7 +3460,7 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
         checkModerationError(data);
 
         if (data.error) {
-            const message = data.error.message || response.statusText || t`Unknown error`;
+            const message = getChatCompletionErrorMessage(data, response);
             toastr.error(message, t`API returned an error`);
             throw new Error(message);
         }
@@ -3542,7 +3602,7 @@ export function getStreamingReply(data, state, { chatCompletionSource = null, ov
             }
         });
         return data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? '';
-    } else if ([chat_completion_sources.CUSTOM, chat_completion_sources.POLLINATIONS, chat_completion_sources.AIMLAPI, chat_completion_sources.CONCENTRATE, chat_completion_sources.MOONSHOT, chat_completion_sources.COMETAPI, chat_completion_sources.ELECTRONHUB, chat_completion_sources.NANOGPT, chat_completion_sources.ZAI, chat_completion_sources.SILICONFLOW, chat_completion_sources.CHUTES, chat_completion_sources.WORKERS_AI].includes(chat_completion_source)) {
+    } else if ([chat_completion_sources.CUSTOM, chat_completion_sources.POLLINATIONS, chat_completion_sources.AIMLAPI, chat_completion_sources.CONCENTRATE, chat_completion_sources.MOONSHOT, chat_completion_sources.COMETAPI, chat_completion_sources.ELECTRONHUB, chat_completion_sources.NANOGPT, chat_completion_sources.ZAI, chat_completion_sources.SILICONFLOW, chat_completion_sources.CHUTES, chat_completion_sources.WORKERS_AI, chat_completion_sources.FIREWORKS].includes(chat_completion_source)) {
         if (show_thoughts) {
             state.reasoning +=
                 data.choices?.filter(x => x?.delta?.reasoning_content)?.[0]?.delta?.reasoning_content ??
@@ -4804,7 +4864,7 @@ async function getStatusOpen() {
     if (oai_settings.chat_completion_source === chat_completion_sources.CUSTOM) {
         $('.model_custom_select').empty();
         data.custom_url = oai_settings.custom_url;
-        data.custom_include_headers = oai_settings.custom_include_headers;
+        data.custom_include_headers = substituteParams(oai_settings.custom_include_headers);
     }
 
     if (oai_settings.chat_completion_source === chat_completion_sources.AZURE_OPENAI) {
@@ -5295,6 +5355,23 @@ async function onLogitBiasPresetDeleteClick() {
     saveSettingsDebounced();
 }
 
+/**
+ * Promise that resolves when the most recently started preset application has fully completed.
+ * The change handler defers the actual apply behind an event emission, so programmatic preset
+ * switches (e.g. /preset, connection profiles) must await this to sequence follow-up commands
+ * such as /api and /model correctly.
+ * @type {Promise<void>}
+ */
+let presetApplicationPromise = Promise.resolve();
+
+/**
+ * Gets a promise that resolves when the currently pending preset application completes.
+ * @returns {Promise<void>} Promise that resolves when the preset is fully applied.
+ */
+export function getPresetApplicationPromise() {
+    return presetApplicationPromise;
+}
+
 // Load OpenAI preset settings
 function onSettingsPresetChange() {
     const presetNameBefore = oai_settings.preset_settings_openai;
@@ -5310,7 +5387,7 @@ function onSettingsPresetChange() {
     const updateCheckbox = (selector, value) => $(selector).prop('checked', value).trigger('input', { source: 'preset' });
 
     // Allow subscribers to alter the preset before applying deltas
-    eventSource.emit(event_types.OAI_PRESET_CHANGED_BEFORE, {
+    presetApplicationPromise = eventSource.emit(event_types.OAI_PRESET_CHANGED_BEFORE, {
         preset: preset,
         presetName: presetName,
         settingsToUpdate: settingsToUpdate,
@@ -5371,6 +5448,7 @@ function getMaxContextOpenAI(value) {
 
     /** @type {[RegExp, number][]} */
     const contextMap = [
+        [/^gpt-6-astra/, max_1050k],
         [/^gpt-5\.6/, max_1050k],
         [/^gpt-5\.[45]/, max_1mil],
         [/^gpt-5/, max_400k],
@@ -6038,7 +6116,7 @@ async function onModelChange() {
     if (oai_settings.chat_completion_source == chat_completion_sources.CLAUDE) {
         if (oai_settings.max_context_unlocked) {
             $('#openai_max_context').attr('max', unlocked_max);
-        } else if (/^claude-(sonnet-4-5|sonnet-4-6|opus-4-6|opus-4-7|opus-4-8|fable)/.test(value)) {
+        } else if (/^claude-(sonnet-4-5|sonnet-4-6|sonnet-5|opus-4-6|opus-4-7|opus-4-8|opus-5|fable)/.test(value)) {
             $('#openai_max_context').attr('max', max_1mil);
         } else if (/^claude-(3|opus|haiku|sonnet)/.test(value)) {
             $('#openai_max_context').attr('max', max_200k);
@@ -6534,10 +6612,8 @@ function reconnectOpenAi() {
     }
 }
 
-function onProxyPasswordShowClick() {
-    const $input = $('#openai_proxy_password');
-    const type = $input.attr('type') === 'password' ? 'text' : 'password';
-    $input.attr('type', type);
+function onProxyAccessKeyShowClick() {
+    $('#openai_proxy_access_key').toggleClass('masked-secret');
     $(this).toggleClass('fa-eye-slash fa-eye');
 }
 
@@ -6584,6 +6660,7 @@ export function isImageInliningSupported() {
         'gpt-4.1',
         'gpt-4.5-preview',
         'gpt-4o',
+        'gpt-6-astra',
         'gpt-5',
         'o1',
         'o3',
@@ -6592,7 +6669,9 @@ export function isImageInliningSupported() {
         'claude-3',
         'claude-fable',
         'claude-opus-4',
+        'claude-opus-5',
         'claude-sonnet-4',
+        'claude-sonnet-5',
         'claude-haiku-4',
         // Cohere
         'c4ai-aya-vision',
@@ -6697,6 +6776,8 @@ export function isImageInliningSupported() {
             const waiModel = Array.isArray(model_list) && model_list.find(m => m.id === oai_settings.workers_ai_model);
             return Boolean(waiModel && Array.isArray(waiModel.properties) && waiModel.properties.some(p => p.property_id === 'vision' && p.value === 'true'));
         }
+        case chat_completion_sources.FIREWORKS:
+            return (Array.isArray(model_list) && model_list.find(m => m.id === oai_settings.fireworks_model)?.supports_image_input);
         default:
             return false;
     }
@@ -6878,7 +6959,7 @@ function setProxyPreset(name, url, password) {
     oai_settings.reverse_proxy = url;
     $('#openai_reverse_proxy').val(oai_settings.reverse_proxy);
     oai_settings.proxy_password = password;
-    $('#openai_proxy_password').val(oai_settings.proxy_password);
+    $('#openai_proxy_access_key').val(oai_settings.proxy_password);
     reconnectOpenAi();
 }
 
@@ -6897,7 +6978,7 @@ function onProxyPresetChange() {
 $('#save_proxy').on('click', async function () {
     const presetName = $('#openai_reverse_proxy_name').val();
     const reverseProxy = $('#openai_reverse_proxy').val();
-    const proxyPassword = $('#openai_proxy_password').val();
+    const proxyPassword = $('#openai_proxy_access_key').val();
 
     setProxyPreset(presetName, reverseProxy, proxyPassword);
     saveSettingsDebounced();
@@ -6931,7 +7012,7 @@ $('#delete_proxy').on('click', async function () {
         oai_settings.reverse_proxy = selected_proxy.url;
         $('#openai_reverse_proxy').val(selected_proxy.url);
         oai_settings.proxy_password = selected_proxy.password;
-        $('#openai_proxy_password').val(selected_proxy.password);
+        $('#openai_proxy_access_key').val(selected_proxy.password);
 
         saveSettingsDebounced();
         $('#openai_proxy_preset').val(selected_proxy.name);
@@ -7353,9 +7434,15 @@ export function initOpenAI() {
         saveSettingsDebounced();
     });
 
-    $('#openai_proxy_password').on('input', function () {
+    $('#openai_proxy_access_key').on('input', function () {
         oai_settings.proxy_password = String($(this).val());
         saveSettingsDebounced();
+    });
+
+    $('#openai_proxy_access_key').on('copy cut', function (event) {
+        if ($(this).hasClass('masked-secret')) {
+            event.preventDefault();
+        }
     });
 
     $('#claude_assistant_prefill').on('input', function () {
@@ -7767,7 +7854,7 @@ export function initOpenAI() {
     $('#openai_logit_bias_export_preset').on('click', onLogitBiasPresetExportClick);
     $('#openai_logit_bias_delete_preset').on('click', onLogitBiasPresetDeleteClick);
     $('#import_oai_preset').on('click', onImportPresetClick);
-    $('#openai_proxy_password_show').on('click', onProxyPasswordShowClick);
+    $('#openai_proxy_access_key_show').on('click', onProxyAccessKeyShowClick);
     $('#customize_additional_parameters').on('click', onCustomizeParametersClick);
     $('#openai_proxy_preset').on('change', onProxyPresetChange);
 }

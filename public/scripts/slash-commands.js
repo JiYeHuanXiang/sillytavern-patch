@@ -38,6 +38,7 @@ import {
     newAssistantChat,
     online_status,
     reloadCurrentChat,
+    refreshSwipeButtons,
     removeMacros,
     renameCharacter,
     renameChat,
@@ -57,11 +58,11 @@ import {
     swipe,
     stopGeneration,
     substituteParams,
-    syncMesToSwipe,
     system_avatar,
     system_message_types,
     this_chid,
     updateMessageElement,
+    updateSwipeCounter,
 } from '../script.js';
 import { SlashCommandParser } from './slash-commands/SlashCommandParser.js';
 import { SlashCommandParserError } from './slash-commands/SlashCommandParserError.js';
@@ -3134,6 +3135,7 @@ export function initDefaultSlashCommands() {
                     new SlashCommandEnumValue('vertexai', 'Google Vertex AI', enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'vertexai')), 'V'),
                     new SlashCommandEnumValue('siliconflow', 'SiliconFlow', enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'siliconflow')), 'S'),
                     new SlashCommandEnumValue('minimax', 'MiniMax', enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'minimax')), 'M'),
+                    new SlashCommandEnumValue('pollinations', 'Pollinations', enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'pollinations')), 'P'),
                     new SlashCommandEnumValue('kobold', 'KoboldAI Classic', enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'kobold')), 'K'),
                     ...Object.values(textgen_types).filter(api => Object.keys(SERVER_INPUTS).includes(api)).map(api => new SlashCommandEnumValue(api, null, enumTypes.getBasedOnIndex(UNIQUE_APIS.findIndex(x => x === 'textgenerationwebui')), 'T')),
                 ],
@@ -3167,7 +3169,7 @@ export function initDefaultSlashCommands() {
                 ${t`If a manual API is provided to <b>set</b> the URL, make sure to set <code>connect=false</code>, as auto-connect only works for the currently selected API, or consider switching to it with <code>/api</code> first.`}
             </div>
             <div>
-                ${t`This slash command works for most of the Text Completion sources, KoboldAI Classic, and also Custom OpenAI compatible, Z.AI, SiliconFlow, MiniMax, and Google Vertex AI for the Chat Completion sources. If unsure which APIs are supported, check the auto-completion of the optional <code>api</code> argument of this command.`}
+                ${t`This slash command works for most of the Text Completion sources, KoboldAI Classic, and also Custom OpenAI compatible, Z.AI, SiliconFlow, MiniMax, Pollinations, and Google Vertex AI for the Chat Completion sources. If unsure which APIs are supported, check the auto-completion of the optional <code>api</code> argument of this command.`}
             </div>
         `,
     }));
@@ -4614,6 +4616,7 @@ async function echoCallback(args, value) {
  * @param {string} value - The swipe text to add (unnamed argument)
  */
 async function addSwipeCallback(args, value) {
+    const lastMessageId = chat.length - 1;
     const lastMessage = chat[chat.length - 1];
 
     if (!lastMessage) {
@@ -4661,15 +4664,13 @@ async function addSwipeCallback(args, value) {
     const newSwipeId = lastMessage.swipes.length - 1;
 
     if (isTrueBoolean(args.switch)) {
-        // Make sure ad-hoc changes to extras are saved before swiping away
-        syncMesToSwipe();
-        lastMessage.swipe_id = newSwipeId;
-        lastMessage.mes = lastMessage.swipes[newSwipeId];
-        lastMessage.extra = structuredClone(lastMessage.swipe_info?.[newSwipeId]?.extra ?? lastMessage.extra ?? {});
+        await swipe(null, SWIPE_DIRECTION.RIGHT, { source: SWIPE_SOURCE.SLASH_COMMAND, repeated: false, forceMesId: lastMessageId, forceSwipeId: newSwipeId });
+    } else {
+        await updateSwipeCounter(lastMessageId, { message: lastMessage });
+        refreshSwipeButtons();
     }
 
     await saveChatConditional();
-    await reloadCurrentChat();
 
     return String(newSwipeId);
 }

@@ -9,7 +9,8 @@ import { getConfigValue, mergeObjectWithYaml, excludeKeysByYaml, trimV1, delay }
 import { assertSafeFetchUrl } from '../url-safety.js';
 import { setAdditionalHeaders } from '../additional-headers.js';
 import { readSecret, SECRET_KEYS } from './secrets.js';
-import { AIMLAPI_HEADERS, OPENROUTER_HEADERS, POLLINATIONS_ENDPOINT, SILICONFLOW_ENDPOINT, ZAI_ENDPOINT } from '../constants.js';
+import { POLLINATIONS_ENDPOINT } from '../constants.js';
+import { AIMLAPI_HEADERS, OPENROUTER_HEADERS, SILICONFLOW_ENDPOINT, ZAI_ENDPOINT } from '../constants.js';
 
 export const router = express.Router();
 
@@ -241,19 +242,6 @@ router.post('/caption-image', async (request, response) => {
 
         if (['koboldcpp', 'vllm', 'llamacpp', 'ooba'].includes(request.body.api)) {
             apiUrl = `${trimV1(request.body.server_url)}/v1/chat/completions`;
-        }
-
-        if (request.body.api === 'ooba') {
-            const imgMessage = body.messages.pop();
-            body.messages.push({
-                role: 'user',
-                content: imgMessage?.content?.[0]?.text,
-            });
-            body.messages.push({
-                role: 'user',
-                content: [],
-                image_url: imgMessage?.content?.[1]?.image_url?.url,
-            });
         }
 
         setAdditionalHeaders(request, { headers }, apiUrl);

@@ -2841,9 +2841,10 @@ async function loadUntilMesId(mesId) {
     return target;
 }
 
-async function doMesCut(_, text) {
+async function doMesCut(args, text) {
     console.debug(`was asked to cut message id #${text}`);
     const range = stringToRange(text, 0, chat.length - 1);
+    const deleteToolCalls = args?.toolcalls === undefined || isTrueBoolean(args.toolcalls);
 
     //reject invalid args or no args
     if (!range) {
@@ -2851,12 +2852,16 @@ async function doMesCut(_, text) {
         return;
     }
 
-    let totalMesToCut = (range.end - range.start) + 1;
-    let mesIDToCut = range.start;
+    const messagesToCut = chat.slice(range.start, range.end + 1);
     let cutText = '';
 
-    for (let i = 0; i < totalMesToCut; i++) {
-        cutText += (chat[mesIDToCut]?.mes || '') + '\n';
+    for (const message of messagesToCut) {
+        const mesIDToCut = chat.indexOf(message);
+        if (mesIDToCut === -1) {
+            continue;
+        }
+
+        cutText += (message?.mes || '') + '\n';
         let mesToCut = $('#chat').find(`.mes[mesid=${mesIDToCut}]`);
 
         if (!mesToCut.length) {
@@ -2868,7 +2873,7 @@ async function doMesCut(_, text) {
         }
 
         setEditedMessageId(mesIDToCut);
-        await deleteMessage(mesIDToCut, null, false);
+        await deleteMessage(mesIDToCut, null, false, deleteToolCalls);
     }
 
     await saveChatConditional();
@@ -2876,7 +2881,7 @@ async function doMesCut(_, text) {
     return cutText;
 }
 
-async function doDelMode(_, text) {
+async function doDelMode(args, text) {
     //reject invalid args
     if (text && isNaN(text)) {
         toastr.warning('Must enter a number or nothing.');
@@ -2885,7 +2890,8 @@ async function doDelMode(_, text) {
 
     // Just enter the delete mode.
     if (!text) {
-        $('#option_delete_mes').trigger('click', { fromSlashCommand: true });
+        const deleteToolCalls = args?.toolcalls === undefined || isTrueBoolean(args.toolcalls);
+        $('#option_delete_mes').trigger('click', { fromSlashCommand: true, deleteToolCalls });
         return '';
     }
 
@@ -2902,7 +2908,7 @@ async function doDelMode(_, text) {
     }
 
     const range = `${chat.length - count}-${chat.length - 1}`;
-    return doMesCut(_, range);
+    return doMesCut(args, range);
 }
 
 function doResetPanels() {
@@ -4240,6 +4246,15 @@ jQuery(() => {
         name: 'del',
         callback: doDelMode,
         aliases: ['delete', 'delmode'],
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({
+                name: 'toolcalls',
+                description: 'also delete associated tool-call messages',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                defaultValue: 'true',
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
         unnamedArgumentList: [
             new SlashCommandArgument(
                 'optional number', [ARGUMENT_TYPE.NUMBER], false,
@@ -4252,6 +4267,15 @@ jQuery(() => {
         name: 'cut',
         callback: doMesCut,
         returns: 'the text of cut messages separated by a newline',
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({
+                name: 'toolcalls',
+                description: 'also delete associated tool-call messages',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                defaultValue: 'true',
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
                 description: 'number or range',

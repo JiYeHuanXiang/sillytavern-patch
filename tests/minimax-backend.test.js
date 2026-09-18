@@ -5,33 +5,34 @@ const readSecretMock = jest.fn(() => 'test-key');
 
 jest.unstable_mockModule('node-fetch', () => ({ default: fetchMock }));
 jest.unstable_mockModule('../src/util.js', () => ({
-    color: {
-        blue: value => value,
-        red: value => value,
-        yellow: value => value,
-    },
+    color: { blue: v => v, red: v => v, yellow: v => v },
     combineAbortSignals: (...signals) => signals[0] ?? null,
     delay: async () => undefined,
-    excludeKeysByYaml: value => value,
-    flattenSchema: value => value,
+    ensureDirectory: () => undefined,
+    excludeKeysByYaml: () => undefined,
+    extractFilesFromZipBuffer: async () => [],
+    flattenSchema: () => undefined,
     forwardFetchResponse: jest.fn(),
+    generateTimestamp: () => '20260101-000000',
     getConfigValue: (_key, defaultValue) => defaultValue,
+    getZipEntryList: async () => [],
     inlineLocalVideoMedia: () => undefined,
+    invalidateFirefoxCache: () => undefined,
+    isPathUnderParent: () => false,
     isValidUrl: value => URL.canParse(value),
-    mergeObjectWithYaml: value => value,
+    mergeObjectWithYaml: () => undefined,
+    normalizeZipEntryPath: value => value,
+    setPermissionsSync: () => undefined,
     trimTrailingSlash: value => value.replace(/\/+$/, ''),
-    trimV1: value => value,
-    tryParse: value => {
-        try {
-            return JSON.parse(value);
-        } catch {
-            return undefined;
-        }
-    },
+    trimV1: () => undefined,
+    tryParse: value => { try { return JSON.parse(value); } catch { return undefined; } },
     uuidv4: () => 'test-uuid',
 }));
 jest.unstable_mockModule('../src/endpoints/secrets.js', () => ({
     readSecret: readSecretMock,
+    writeSecret: () => undefined,
+    SECRETS_FILE: 'secrets.json',
+    allowKeysExposure: false,
     SECRET_KEYS: { MINIMAX: 'api_key_minimax' },
 }));
 
