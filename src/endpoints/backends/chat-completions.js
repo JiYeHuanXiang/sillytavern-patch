@@ -540,6 +540,7 @@ async function sendMakerSuiteRequest(request, response) {
     const responseMimeType = request.body.responseMimeType ?? (request.body.json_schema ? 'application/json' : undefined);
     const responseSchema = request.body.responseSchema ?? (request.body.json_schema ? request.body.json_schema.value : undefined);
 
+    /** @type {Record<string, any>} */
     const generationConfig = {
         stopSequences: request.body.stop,
         candidateCount: 1,

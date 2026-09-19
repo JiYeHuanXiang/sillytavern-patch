@@ -542,7 +542,7 @@ export function getArrayBufferSlice(view) {
         throw new TypeError('Expected Uint8Array');
     }
 
-    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+    return /** @type {ArrayBuffer} */ (view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
 }
 
 function isObject(item) {

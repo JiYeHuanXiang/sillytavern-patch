@@ -424,7 +424,7 @@ export async function getChatInfo(pathToFile, additionalData = {}, withMetadata 
         const fileStream = fs.createReadStream(pathToFile);
 
         // The file can still disappear between the stat above and the stream opening
-        fileStream.on('error', (error) => {
+        fileStream.on('error', (/** @type {NodeJS.ErrnoException} */ error) => {
             if (error.code === 'ENOENT') {
                 res(chatVanished());
                 return;

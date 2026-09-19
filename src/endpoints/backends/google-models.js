@@ -55,6 +55,7 @@ export async function fetchGoogleModels(modelsUrl, fetchImpl = fetch) {
             throw new GoogleModelsHttpError(response.status, response.statusText);
         }
 
+        /** @type {any} */
         let data;
         try {
             data = await response.json();
