@@ -198,10 +198,20 @@ export function registerCoreMacros() {
                     condition = resolve(`{{${condition}}}`);
                 } else {
                     // Check if condition looks like a valid variable name
-                    // If so, resolve it as a local variable (same as .varname shorthand)
+                    // If so, resolve it as a local variable (same as .varname shorthand).
+                    // Only adopt the resolved value when the variable actually exists:
+                    // a bare literal such as {{if true}} or {{if someWord}} would otherwise
+                    // be looked up as an undefined variable, resolve to empty and be
+                    // misread as falsy, dropping the then-branch.
                     const varNameRegex = new RegExp(`^${MACRO_VARIABLE_SHORTHAND_PATTERN.source}$`);
                     if (varNameRegex.test(condition)) {
-                        condition = resolve(`{{getvar::${condition}}}`);
+                        const resolvedVariable = resolve(`{{getvar::${condition}}}`);
+                        // An undefined variable resolves to an empty string; a variable that
+                        // exists but holds only whitespace stays sentinel-wrapped. Only the
+                        // former means "this word is not a variable, treat it as a literal".
+                        if (resolvedVariable !== '') {
+                            condition = resolvedVariable;
+                        }
                     }
                 }
             }
