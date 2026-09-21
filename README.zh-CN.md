@@ -4,8 +4,8 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
-[![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.2.1-brightgreen.svg)](CHANGELOG.md)
+[![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.19.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
+[![Version](https://img.shields.io/badge/version-1.19.0--patch--3-brightgreen.svg)](CHANGELOG.md)
 
 基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
 
@@ -34,6 +34,14 @@
   > 该功能同时修复了原版遇到完整 HTML 页面时只能直接显示代码块的问题。
 - **纯净模式**：新增 `pure_mode` 开关（User Settings 面板 + `/pure-mode` 斜杠命令）。开启后禁用酒馆自带的全部系统提示词注入（main / nsfw / jailbreak / 角色描述·性格·场景·人设 / 世界书前后 / 作者备注 / summary / vectors / bias 等），只把对话回合发给模型，适用于角色扮演之外的场景。同时覆盖 Chat Completion 与 Text Completion 两条管线。
 - **时间感知**：新增 `time_perception` 开关（含 `default_timeout`、`placeholder`）。AI 回合一结束，由 AI 自己决定等待玩家多久（限制 1~10 分钟，取值失败回退 `default_timeout`）；到点玩家仍无回应则插入一条可见的用户侧占位消息（默认 `(玩家未回应)`）再触发生成，让角色对"沉默"做出反应。监听输入框：框内非空（玩家正在输入）时暂停计时并重置，打字慢不会被误判为无回应。**仅 1 对 1 聊天。**
+- **分支导航与可视化分支图谱**：消息新增「分支」按钮，弹窗列表展示该消息的全部分支聊天（时间 / 条数 / 预览），点击即可切换；「更多」菜单新增分支图谱，树状可视化父子分支关系，点击节点跳转。适配 fork 的 swipe 分支快照机制（灵感来源: SillyTavern#5283）。
+- **预设行动选项过滤**：可选过滤角色卡附加在 AI 消息末尾的预设行动块（如「1.继续交谈 2.离开现场」）及其引导语（如「请选择你的行动：」），显示与发送给模型的提示词同步过滤，聊天文件不被修改；仅当块内含至少两个编号选项时才移除，普通编号段落不受影响。
+- **Reasoning 预填充**：提示词管理器支持 assistant 角色的 Reasoning Prefill 字段，随请求以 `reasoning_content` 发送，用于引导模型推理的起点，令牌计数纳入统计。
+- **提示词缓存开关与 DeepSeek 缓存诊断**：Custom 源新增「启用提示词缓存」开关（注入 Anthropic/Gemini 风格 `cache_control`，配合 `config.yaml` 缓存配置）；DeepSeek 源新增缓存诊断面板，展示命中 / 未命中 tokens、命中率与断点消息定位。
+- **HTML 渲染模式切换**：HTML 沙箱预览功能提供「补丁版 / 原版」渲染模式下拉框，可一键切回上游 Markdown + DOMPurify 行为，切换后重载当前聊天即时生效。
+- **用户消息「禁止转译」**：可选让用户发送消息中的 `*`、`#` 等 Markdown 字符按原样显示，不再被解析为格式；仅作用于用户消息，AI 回复与角色卡首条消息不受影响。
+- **拓展插件 zip 导入**：拓展设置面板新增「导入拓展」按钮，选择 zip 压缩包即可安装第三方拓展；服务端严格校验（manifest 合法性、拒绝路径穿越 / 符号链接、限制压缩包大小与解压总量防 zip 炸弹）。
+- **Custom 端点思考模式手动分类**：Custom 源 API 设置页新增「思考模式类型」下拉框（OpenAI 兼容 / DeepSeek 类 / Qwen 类等），修复非 OpenAI 白名单模型（Qwen3、GLM、Kimi 等）思考模式设置被静默丢弃的问题。
 
 ### 稳定性与健壮性
 

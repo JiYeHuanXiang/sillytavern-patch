@@ -4,8 +4,8 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
-[![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.18.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.18.0--patch--2.2.1-brightgreen.svg)](CHANGELOG.md)
+[![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.19.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
+[![Version](https://img.shields.io/badge/version-1.19.0--patch--3-brightgreen.svg)](CHANGELOG.md)
 [![Android Client](https://img.shields.io/badge/Android%20Client-ST--patch--android-3DDC84.svg?logo=android&logoColor=white)](https://github.com/JiYeHuanXiang/ST-patch-android)
 
 A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/SillyTavern) with targeted improvements for **Chinese domestic LLMs** and **large character card collections**.
@@ -34,6 +34,14 @@ A personal, customized fork of [SillyTavern](https://github.com/SillyTavern/Sill
   > This also fixes the upstream behavior of dumping full HTML pages as plain code blocks.
 - **Pure Mode**: Adds a `pure_mode` toggle (User Settings panel + `/pure-mode` slash command). When enabled, it disables all of SillyTavern's built-in system prompt injection — main / nsfw / jailbreak / character description·personality·scenario·persona / world book before & after / author's note / summary / vectors / bias, etc. — and sends only the conversation turns to the model. Useful for non-roleplay use cases. Covers both the Chat Completion and Text Completion pipelines.
 - **Time Perception**: Adds a `time_perception` toggle (with `default_timeout` and `placeholder` options). After an AI turn ends, the AI itself decides how long to wait for the player (clamped to 1–10 minutes; falls back to `default_timeout` on parse failure). If the player hasn't responded when the timer fires, a visible user-side placeholder message (default `(玩家未回应)`) is inserted and a new generation is triggered, so the character can react to the "silence." Typing in the input box pauses and resets the timer so slow typists aren't misjudged as absent. **1-on-1 chats only.**
+- **Branch Navigator & Visual Branch Graph**: Messages gain a "Branches" button that lists every branch chat anchored to that message (time / message count / preview — click to switch); the "More" menu adds a branch graph visualizing parent-child branch relationships as a clickable tree. Adapted to the fork's swipe-branch snapshot mechanism (inspired by SillyTavern#5283).
+- **Preset Action Choices Filter**: An optional filter for the preset action blocks character cards append to AI messages (e.g. "1. Continue talking 2. Leave the scene") together with their lead-in prompts ("Please choose your action:") — removed from both the display and the prompt sent to the model, while chat files are never modified. A block is only removed when it contains at least two indexed options, so ordinary numbered prose is untouched.
+- **Reasoning Prefill**: The prompt manager supports a Reasoning Prefill field on the assistant role, sent as `reasoning_content` with the request to steer where the model's reasoning starts; included in token counts.
+- **Prompt Cache Toggle & DeepSeek Cache Diagnostics**: The Custom source gains an "Enable prompt caching" switch (injects Anthropic/Gemini-style `cache_control`, works with the `config.yaml` cache settings); the DeepSeek source gains a cache diagnostics panel showing hit/miss tokens, hit rate, and the breakpoint message.
+- **HTML Render Mode Switch**: The HTML sandbox preview feature offers a "Patch / Upstream" render-mode dropdown — switch back to the upstream Markdown + DOMPurify behavior at any time, effective after reloading the current chat.
+- **Forbid Markdown in User Messages**: Optionally render `*`, `#` and other Markdown characters in your own messages literally instead of parsing them as formatting; only affects user messages, not AI replies or `first_mes`.
+- **ZIP Import for Extensions**: An "Import Extension" button in the extension settings panel installs third-party extensions from ZIP archives, with strict server-side validation (manifest checks, path traversal / symlink rejection, archive size and extraction limits against zip bombs).
+- **Manual Thinking-Mode Classification for Custom Endpoints**: A "Thinking Mode Type" dropdown on the Custom source API settings page (OpenAI-compatible / DeepSeek-style / Qwen-style, etc.), fixing `reasoning_effort` being silently dropped for models outside the OpenAI whitelist (Qwen3, GLM, Kimi, ...).
 
 ### Stability & Robustness
 
