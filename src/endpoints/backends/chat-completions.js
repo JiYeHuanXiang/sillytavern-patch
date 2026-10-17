@@ -291,7 +291,7 @@ export function normalizeReasoningEffort({ source, reasoningEffort, customThinki
 
     const usesThinkingToggle = thinkingToggleSources.includes(source)
         || (source === CHAT_COMPLETION_SOURCES.CUSTOM
-            && ['disable_deepseek', 'disable_qwen'].includes(customThinkingMode));
+            && (customThinkingMode === 'disable_deepseek' || customThinkingMode === 'disable_qwen'));
 
     return usesThinkingToggle ? reasoningEffort : 'low';
 }
