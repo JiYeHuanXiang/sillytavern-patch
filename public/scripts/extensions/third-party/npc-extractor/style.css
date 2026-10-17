@@ -1,0 +1,142 @@
+#ne_wizard .ne_step {
+    margin-bottom: 14px;
+}
+
+#ne_wizard .ne_step_title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+#ne_wizard .ne_step_no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5em;
+    height: 1.5em;
+    flex: none;
+    border-radius: 50%;
+    background: var(--grey30y);
+    font-size: 0.85em;
+}
+
+#ne_wizard .ne_row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+#ne_wizard .ne_label {
+    flex: none;
+    min-width: 8.5em;
+}
+
+#ne_wizard .ne_select {
+    flex: 1;
+    min-width: 0;
+}
+
+#ne_wizard .ne_hint {
+    margin: 4px 0;
+    color: var(--grey70);
+    font-size: 0.9em;
+}
+
+#ne_wizard .ne_chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0;
+}
+
+#ne_wizard .ne_chip {
+    cursor: pointer;
+    padding: 2px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    font-size: 0.9em;
+    user-select: none;
+}
+
+#ne_wizard .ne_chip:hover {
+    background: var(--SmartThemeBlurTintColor);
+}
+
+#ne_wizard .ne_actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+#ne_wizard .ne_progress {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--grey30y);
+    overflow: hidden;
+}
+
+#ne_wizard #ne_progress_fill {
+    height: 100%;
+    width: 0;
+    background: var(--SmartThemeQuoteColor);
+    transition: width 0.3s ease;
+}
+
+#ne_wizard .ne_grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+#ne_wizard .ne_field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+#ne_wizard .ne_span2 {
+    grid-column: span 2;
+}
+
+#ne_wizard .ne_field textarea,
+#ne_wizard .ne_field input {
+    width: 100%;
+}
+
+#ne_wizard .ne_carry_box {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 8px;
+    margin: 8px 0;
+}
+
+#ne_wizard .ne_carry_title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+#ne_wizard .ne_carry_row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+}
+
+#npc_extractor_settings .ne_setting_row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+#npc_extractor_settings .ne_setting_row label {
+    flex: none;
+}
+
+#npc_extractor_settings .ne_setting_row input {
+    width: 8em;
+}

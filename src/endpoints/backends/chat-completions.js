@@ -261,6 +261,42 @@ function resolveDeepSeekThinking(model, includeReasoning, reasoningEffort) {
 }
 
 /**
+ * Normalize the internal 'disabled' reasoning-effort sentinel for a request.
+ *
+ * Sources whose handlers translate the sentinel into a thinking toggle or a
+ * reasoning budget keep it. Every other OpenAI-compatible source forwards
+ * reasoning_effort verbatim, so 'disabled' (SillyTavern's internal value) would
+ * be rejected by the provider; use the lowest supported effort instead.
+ *
+ * @param {object} params
+ * @param {string} params.source chat_completion_source
+ * @param {string|undefined} params.reasoningEffort request.body.reasoning_effort
+ * @param {string|undefined} [params.customThinkingMode] request.body.custom_thinking_mode_type
+ * @returns {string|undefined} normalized reasoning effort
+ */
+export function normalizeReasoningEffort({ source, reasoningEffort, customThinkingMode }) {
+    if (reasoningEffort !== 'disabled') {
+        return reasoningEffort;
+    }
+
+    const thinkingToggleSources = [
+        CHAT_COMPLETION_SOURCES.DEEPSEEK,
+        CHAT_COMPLETION_SOURCES.MOONSHOT,
+        CHAT_COMPLETION_SOURCES.ZAI,
+        CHAT_COMPLETION_SOURCES.SILICONFLOW,
+        CHAT_COMPLETION_SOURCES.CLAUDE,
+        CHAT_COMPLETION_SOURCES.MAKERSUITE,
+        CHAT_COMPLETION_SOURCES.VERTEXAI,
+    ];
+
+    const usesThinkingToggle = thinkingToggleSources.includes(source)
+        || (source === CHAT_COMPLETION_SOURCES.CUSTOM
+            && ['disable_deepseek', 'disable_qwen'].includes(customThinkingMode));
+
+    return usesThinkingToggle ? reasoningEffort : 'low';
+}
+
+/**
  * Sends a request to Claude API.
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
@@ -474,7 +510,7 @@ async function sendClaudeRequest(request, response) {
             console.debug('Claude response:', generateResponseJson);
 
             // Wrap it back to OAI format + save the original content
-            const reply = { choices: [{ 'message': { 'content': responseText } }], content: generateResponseJson.content };
+            const reply = { choices: [{ 'message': { 'content': responseText } }], content: generateResponseJson.content, usage: generateResponseJson.usage };
             return response.send(reply);
         }
     } catch (error) {
@@ -823,7 +859,7 @@ async function sendMakerSuiteRequest(request, response) {
             }
 
             // Wrap it back to OAI format (responseContent includes thought signatures in parts array)
-            const reply = { choices: [{ 'message': { 'content': responseText } }], responseContent };
+            const reply = { choices: [{ 'message': { 'content': responseText } }], responseContent, usageMetadata: generateResponseJson.usageMetadata };
             return response.send(reply);
         }
     } catch (error) {
@@ -1109,7 +1145,7 @@ async function sendCohereRequest(request, response) {
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
  */
-async function sendDeepSeekRequest(request, response) {
+export async function sendDeepSeekRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_DEEPSEEK).toString();
     await assertSafeFetchUrl(apiUrl, { allowPrivate: true });
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.DEEPSEEK, request.body.secret_id);
@@ -1162,7 +1198,9 @@ async function sendDeepSeekRequest(request, response) {
         addReasoningContentToToolCalls(processedMessages);
         processedMessages.forEach(msg => delete msg.source);
 
-        if (request.body.include_reasoning && request.body.reasoning_effort) {
+        // 'disabled' is ST's internal sentinel, not a valid DeepSeek reasoning_effort
+        // value; the thinking:{type:'disabled'} field below turns thinking off instead.
+        if (request.body.include_reasoning && request.body.reasoning_effort && request.body.reasoning_effort !== 'disabled') {
             bodyParams['reasoning_effort'] = request.body.reasoning_effort;
         }
 
@@ -2496,14 +2534,14 @@ router.post('/generate', async function (request, response) {
             request.body.json_schema.value = flattenSchema(request.body.json_schema.value, request.body.chat_completion_source);
         }
 
-        // Thinking-mode normalization for models that don't support fully
-        // disabling thinking via the {"thinking":{"type":"disabled"}} format.
-        // Only DeepSeek-family models support that format (via resolveDeepSeekThinking),
-        // and a few sources use their own thinking toggle (Moonshot/ZAI/SiliconFlow),
-        // or budget-based reasoning (Claude/Google) that never reads reasoning_effort.
-        // For everything else, when the user explicitly requests "disabled"
-        // (reasoning_effort === 'disabled'), map it to the minimum depth 'low' so
-        // behaviour is as close to "off" as the model allows.
+        // Thinking-mode normalization. The client sends the internal sentinel
+        // "disabled" when the user turns thinking off. Only sources whose
+        // handlers translate that sentinel into a real toggle or budget keep it:
+        // DeepSeek/Moonshot/ZAI/SiliconFlow thinking.type, Claude/Google budgets,
+        // and CUSTOM with a disable_deepseek/disable_qwen classification.
+        // Every other OpenAI-compatible source forwards reasoning_effort
+        // verbatim, so the sentinel would be rejected by the provider; coerce it
+        // to 'low', the closest supported "off" for models that can't disable thinking.
         //
         // For the CUSTOM source, the user manually classifies the model via the
         // "custom_thinking_mode_type" setting:
@@ -2511,28 +2549,11 @@ router.post('/generate', async function (request, response) {
         //   'disable_qwen'       → Qwen-style, keeps 'disabled' (mapped to 'none' later)
         //   'disable_unsupported'→ OpenAI-style, coerce to 'low'
         //   'auto'               → default to OpenAI-style, coerce to 'low'
-        if (request.body.reasoning_effort === 'disabled') {
-            let _usesThinkingToggle = /^deepseek-/.test(request.body.model)
-                || [
-                    CHAT_COMPLETION_SOURCES.DEEPSEEK,
-                    CHAT_COMPLETION_SOURCES.MOONSHOT,
-                    CHAT_COMPLETION_SOURCES.ZAI,
-                    CHAT_COMPLETION_SOURCES.SILICONFLOW,
-                    CHAT_COMPLETION_SOURCES.CLAUDE,
-                    CHAT_COMPLETION_SOURCES.MAKERSUITE,
-                    CHAT_COMPLETION_SOURCES.VERTEXAI,
-                ].includes(request.body.chat_completion_source);
-
-            // Respect the user's manual classification for Custom endpoints
-            if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.CUSTOM
-                && ['disable_deepseek', 'disable_qwen'].includes(request.body.custom_thinking_mode_type)) {
-                _usesThinkingToggle = true;
-            }
-
-            if (!_usesThinkingToggle) {
-                request.body.reasoning_effort = 'low';
-            }
-        }
+        request.body.reasoning_effort = normalizeReasoningEffort({
+            source: request.body.chat_completion_source,
+            reasoningEffort: request.body.reasoning_effort,
+            customThinkingMode: request.body.custom_thinking_mode_type,
+        });
 
         // Inline local video files into base64 data URLs on the server so that
         // large videos never enter the browser JS heap at generation time.

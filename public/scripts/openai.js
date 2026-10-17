@@ -47,6 +47,7 @@ import { forceCharacterEditorTokenize, getCustomStoppingStrings, persona_descrip
 import { SECRET_KEYS, secret_state, writeSecret } from './secrets.js';
 
 import { getEventSourceStream } from './sse-stream.js';
+import { extractCacheUsage } from './cache-usage.js';
 import {
     clamp,
     createThumbnail,
@@ -3430,6 +3431,7 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
                 }
                 tryParseStreamingError(response, rawData);
                 const parsed = JSON.parse(rawData);
+                const cacheUsage = extractCacheUsage(parsed);
 
                 // Extract DeepSeek cache usage from the final streaming chunk
                 if (isDeepSeek && parsed?.usage) {
@@ -3450,7 +3452,7 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
 
                 ToolManager.parseToolCalls(toolCalls, parsed, state.toolSignatures);
 
-                yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed), toolCalls: toolCalls, state: state };
+                yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed), toolCalls: toolCalls, state: state, cacheUsage: cacheUsage };
             }
         };
     } else {

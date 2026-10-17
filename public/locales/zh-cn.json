@@ -3722,5 +3722,6 @@
     "Hit Rate:": "命中率:",
     "tokens": "tokens",
     "Cache break at message #": "缓存断点位于消息 #",
+    "Cache hit": "缓存命中",
     "(source: ": "(来源: "
 }

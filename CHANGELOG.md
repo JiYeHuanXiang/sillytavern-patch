@@ -4,6 +4,55 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.19.0-patch-3.1] - 2026-10-18
+
+### ✨ 新增
+
+- **消息缓存命中率徽标**：每条 AI 消息的作者名旁新增缓存命中徽标（如
+  `Cache hit 87%`），悬停显示命中 tokens / 总 prompt tokens 与百分比，
+  仅在供应商返回缓存统计时显示。客户端统一解析四种 usage 结构：DeepSeek
+  （`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`）、OpenAI 兼容
+  （`prompt_tokens_details.cached_tokens`）、Anthropic
+  （`cache_read_input_tokens` / `cache_creation_input_tokens`）与 Gemini
+  （`cachedContentTokenCount`），流式与非流式生成均生效，数值字符串（常见于
+  中转响应）也能识别。结果写入消息 `extra.cache_usage` 并随聊天保存，切换
+  聊天或重新加载后仍可见；「文档样式」下自动隐藏。Claude 与 Google
+  （MakerSuite / Vertex）响应补充透传 `usage` / `usageMetadata` 供解析。
+- **NPC 角色提取拓展**：内置拓展新增 `npc-extractor`，可从单聊 / 群聊记录
+  中检索指定 NPC 的台词，按块扫描聊天并调用模型整理后生成新角色卡；新卡
+  沿用来源卡的头像底图、内嵌世界书与 `extensions` 元数据，支持候选名字
+  点选、分块大小与提取长度配置。
+
+### 🐛 修复
+
+- **DeepSeek 官方源「关闭思考」请求 422**：推理力度选择「关闭」且开启
+  「显示思考」时，请求体会同时携带合法的 `thinking: {type: 'disabled'}` 与
+  非法的 `reasoning_effort: "disabled"`，DeepSeek 网关在反序列化阶段整包
+  拒绝（`unknown variant 'disabled'`，HTTP 422）。现关闭思考只通过
+  `thinking.type` 表达，`disabled` 不再作为 `reasoning_effort` 发送。
+- **同类问题统一收口**：新增 `normalizeReasoningEffort()` 统一处理关闭哨兵。
+  只有真正消费该值的源保留 `disabled`——DeepSeek / SiliconFlow / Moonshot /
+  ZAI 的 `thinking.type`、Claude / Google 的思考预算，以及 Custom 源的
+  「通过 thinking 关闭」「通过 enable_thinking 关闭」两种手动分类；其余
+  OpenAI 兼容源（OpenCode Go、NanoGPT、Chutes、AIMLAPI、ElectronHub、
+  Concentrate、Infersia、Perplexity、Pollinations、OpenAI、XAI 等）沿用
+  既有策略，将「关闭」映射为最低档 `low`，不再把内部哨兵原样发给供应商。
+  确认可触发的路径包括 OpenCode Go 的裸 `deepseek-v4-*` 模型 ID 与 NanoGPT
+  的 `deepseek-ai/*`（后者原实现会发送空的 `reasoning` 对象）。
+- **GLM 等模型图标回退成问号**：Custom 源（如 SiliconFlow 端点）下的模型
+  ID 常带供应商前缀（`zai-org/GLM-4.6`、`THUDM/glm-4-9b-chat`），原先按
+  完整 ID 匹配模型图标、不命中后回退到 Custom 源图标 `custom.svg`（本身即
+  问号）。现先剥离 `vendor/` 前缀并统一小写，再依次尝试模型专属图标、品牌
+  图标（GLM→Z.ai，Claude / GPT-o 系 / Gemini / Gemma / Grok / Kimi /
+  Mistral / DeepSeek / MiniMax 复用已有供应商图标）、供应商图标，最后才是
+  问号；候选路径自动去重。
+
+### 🔨 工程
+
+- 新增推理力度归一化矩阵测试、DeepSeek 请求体回归测试、缓存命中率解析测试
+  （DeepSeek / OpenAI 兼容 / Anthropic / Gemini 四种 usage 结构）与模型图标
+  解析测试，全量单元测试 25 个套件、506 个用例通过。
+
 ## [1.19.0-patch-3] - 2026-09-20
 
 ### ✨ 新增

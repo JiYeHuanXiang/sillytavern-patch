@@ -1,0 +1,18 @@
+{
+    "display_name": "NPC Character Extractor",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "jiyehuanxiang",
+    "version": "1.0.0",
+    "homePage": "",
+    "i18n": {
+        "zh-cn": "locales/zh-cn.json",
+        "zh-tw": "locales/zh-tw.json"
+    },
+    "hooks": {
+        "activate": "init"
+    }
+}

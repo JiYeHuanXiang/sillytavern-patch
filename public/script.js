@@ -116,6 +116,9 @@ import {
     initOpenAI,
 } from './scripts/openai.js';
 
+import { extractCacheUsage } from './scripts/cache-usage.js';
+import { resolveIconCandidates } from './scripts/model-icons.js';
+
 import {
     generateNovelWithStreaming,
     getNovelGenerationData,
@@ -2262,104 +2265,9 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId, san
 }
 
 /**
- * Maps model name prefixes to icon file basenames in /img/.
- * Keys are matched as case-insensitive prefixes against the model name.
- * When a prefix matches, the mapped basename is tried (.png then .svg) before
- * falling back to the provider icon.
- * @type {Record<string, string>}
- */
-const MODEL_ICON_MAP = {
-    'glm-5.3': 'glm-5.3',
-    'glm-5.2': 'glm-5.2',
-    'glm-5.1': 'glm-5.1',
-    'glm-5-turbo': 'glm-5-turbo',
-    'glm-5v-turbo': 'glm-5v-turbo',
-    'glm-5': 'glm-5',
-    'glm-4.7': 'glm-4.7',
-    'glm-4.6': 'glm-4.6',
-    'glm-4.5': 'glm-4.5',
-    'glm-4': 'glm-4',
-    'claude-opus': 'claude-opus',
-    'claude-sonnet': 'claude-sonnet',
-    'claude-haiku': 'claude-haiku',
-    'claude-fable': 'claude-fable',
-    'claude-3': 'claude-3',
-    'gpt-5.6': 'gpt-5.6',
-    'gpt-5.5': 'gpt-5.5',
-    'gpt-5.4': 'gpt-5.4',
-    'gpt-5.3': 'gpt-5.3',
-    'gpt-5.2': 'gpt-5.2',
-    'gpt-5': 'gpt-5',
-    'gpt-4o': 'gpt-4o',
-    'gpt-4': 'gpt-4',
-    'gpt-3': 'gpt-3',
-    'o1': 'o1',
-    'o3': 'o3',
-    'o4': 'o4',
-    'deepseek-v4': 'deepseek-v4',
-    'deepseek-v3': 'deepseek-v3',
-    'deepseek-r1': 'deepseek-r1',
-    'deepseek-chat': 'deepseek-chat',
-    'deepseek': 'deepseek',
-    'MiniMax-M3': 'minimax-m3',
-    'MiniMax-M2': 'minimax-m2',
-    'M2-her': 'minimax-her',
-    'grok-4': 'grok-4',
-    'grok-3': 'grok-3',
-    'grok-2': 'grok-2',
-    'mistral-large': 'mistral-large',
-    'mistral-medium': 'mistral-medium',
-    'mistral-small': 'mistral-small',
-    'gemini-3': 'gemini-3',
-    'gemini-2.5': 'gemini-2.5',
-    'gemini-2.0': 'gemini-2.0',
-    'gemini': 'gemini',
-    'gemma-4': 'gemma-4',
-    'kimi-k2': 'kimi-k2',
-    'kimi': 'kimi',
-};
-
-/**
- * Resolves the ordered list of candidate icon paths for a given API/model pair.
- * Priority: (1) MODEL_ICON_MAP prefix match, (2) sanitized model name, (3) provider fallback.
- * Each candidate yields a .png then .svg attempt, except the provider fallback which is .svg only.
- * @param {string} apiName API identifier (provider, e.g. 'zai', 'claude')
- * @param {string} modelName Model name (e.g. 'glm-5.3-flash')
- * @returns {string[]} Ordered candidate paths, last is always the provider fallback
- */
-function resolveIconCandidates(apiName, modelName) {
-    const candidates = [];
-    const lowerModel = (modelName || '').toLowerCase();
-
-    // (1) Mapping table — longest-prefix-first so 'glm-5.3' beats 'glm-5'
-    const mapKeys = Object.keys(MODEL_ICON_MAP)
-        .filter(k => lowerModel.startsWith(k.toLowerCase()))
-        .sort((a, b) => b.length - a.length);
-
-    for (const key of mapKeys) {
-        const base = MODEL_ICON_MAP[key];
-        candidates.push(`/img/${base}.png`, `/img/${base}.svg`);
-    }
-
-    // (2) Sanitized model name (strip vendor path prefixes like 'deepseek-ai/')
-    if (modelName) {
-        const sanitized = modelName
-            .replace(/^[^/]+\//, '')      // strip 'vendor/' prefix
-            .replace(/[^a-zA-Z0-9._-]/g, '-')
-            .replace(/-+/g, '-');
-        if (sanitized && !mapKeys.length) {
-            candidates.push(`/img/${sanitized}.png`, `/img/${sanitized}.svg`);
-        }
-    }
-
-    // (3) Provider fallback (always last, always svg)
-    candidates.push(`/img/${apiName}.svg`);
-    return candidates;
-}
-
-/**
  * Creates an Image element for the given API/model icon.
- * Tries model-specific icons first (png or svg), falling back to the provider svg.
+ * Tries model-specific icons first (mapped or exact model name), then a brand
+ * icon for known model families, falling back to the provider svg.
  * The caller is responsible for appending the image to the DOM and optionally calling `SVGInject` on it.
  *
  * A throwaway probe Image sequentially tries each candidate; once one loads it is
@@ -3216,6 +3124,41 @@ export function addOneMessage(mes, { type = undefined, insertAfter = null, scrol
 }
 
 /**
+ * Updates the cache hit rate badge next to the message author name.
+ * @param {JQuery<HTMLElement>|HTMLElement|null} messageElement Message element
+ * @param {ChatMessage|undefined} mes Message object
+ */
+function updateMessageCacheUsageBadge(messageElement, mes) {
+    if (!messageElement) {
+        return;
+    }
+
+    const $messageElement = messageElement instanceof HTMLElement ? $(messageElement) : messageElement;
+    const $badge = $messageElement.find('.ch_name .mes_cache_hit_rate');
+
+    if (!$badge.length) {
+        return;
+    }
+
+    const usage = mes?.extra?.cache_usage;
+    const hitRate = Number(usage?.hit_rate);
+    const totalTokens = Number(usage?.total_tokens);
+
+    if (mes?.is_user || mes?.is_system || !usage || !Number.isFinite(hitRate) || !Number.isFinite(totalTokens) || totalTokens <= 0) {
+        $badge.text('').removeAttr('title');
+        return;
+    }
+
+    const rate = Math.min(100, Math.max(0, Math.round(hitRate)));
+    const hitTokens = Number(usage.hit_tokens) || 0;
+    const label = t`Cache hit`;
+    const tokenLabel = t`tokens`;
+    const title = `${label}: ${hitTokens.toLocaleString()} / ${totalTokens.toLocaleString()} ${tokenLabel} (${rate}%)`;
+
+    $badge.text(`${label} ${rate}%`).attr('title', title);
+}
+
+/**
  * Creates the element of a single message as if it were the last message or at forceMesId
  * @param {ChatMessage} mes Message object
  * @param {object} [options] Options
@@ -3271,6 +3214,7 @@ export function updateMessageElement(mes, { messageId = chat.length - 1, message
     messageElement.find('.avatar img').attr('src', avatarImg);
     messageElement.find('.ch_name .name_text').text(mes.name);
     messageElement.find('.timestamp').text(timestamp).attr('title', `${mes.extra?.api ? mes.extra.api + ' - ' : ''}${mes.extra?.model ?? ''}`);
+    updateMessageCacheUsageBadge(messageElement, mes);
     messageElement.find('.mesIDDisplay').text(`#${messageId}`);
     tokenCount && messageElement.find('.tokenCounterDisplay').text(`${tokenCount}t`);
     mes.title && messageElement.attr('title', mes.title);
@@ -4201,6 +4145,8 @@ class StreamingProcessor {
         this.images = [];
         /** @type {string?} */
         this.reasoningSignature = null;
+        /** @type {import('./scripts/cache-usage.js').CacheUsage|null} */
+        this.cacheUsage = null;
     }
 
     /**
@@ -4251,6 +4197,7 @@ class StreamingProcessor {
             await saveReply({ type: this.type, getMessage: text, fromStreaming: true });
             messageId = chat.length - 1;
             await this.#checkDomElements(messageId, continueOnReasoning);
+            updateMessageCacheUsageBadge(this.messageDom, chat[messageId]);
             this.markUIGenStarted();
         }
         hideSwipeButtons({ hideCounters: true });
@@ -4378,6 +4325,12 @@ class StreamingProcessor {
 
         await this.reasoningHandler.finish(messageId);
 
+        if (message && this.type !== 'impersonate' && this.cacheUsage) {
+            message.extra = message.extra || {};
+            message.extra.cache_usage = this.cacheUsage;
+        }
+        updateMessageCacheUsageBadge(messageElement, message);
+
         if (Array.isArray(this.swipes) && this.swipes.length > 0) {
             const swipeInfoExtra = structuredClone(message.extra ?? {});
             delete swipeInfoExtra.token_count;
@@ -4468,7 +4421,7 @@ class StreamingProcessor {
     }
 
     /**
-     * @returns {AsyncGenerator<{ text: string, swipes: string[], logprobs: import('./scripts/logprobs.js').TokenLogprobs, toolCalls: any[], state: any }, void, void>}
+     * @returns {AsyncGenerator<{ text: string, swipes: string[], logprobs: import('./scripts/logprobs.js').TokenLogprobs, toolCalls: any[], state: any, cacheUsage: import('./scripts/cache-usage.js').CacheUsage|null }, void, void>}
      */
     async* nullStreamingGeneration() {
         throw new Error('Generation function for streaming is not hooked up');
@@ -4490,7 +4443,7 @@ class StreamingProcessor {
         try {
             const sw = new Stopwatch(1000 / power_user.streaming_fps);
             const timestamps = [];
-            for await (const { text, swipes, logprobs, toolCalls, state } of this.generator()) {
+            for await (const { text, swipes, logprobs, toolCalls, state, cacheUsage } of this.generator()) {
                 const now = Date.now();
                 timestamps.push(now);
                 if (!this.timeToFirstToken) {
@@ -4510,6 +4463,9 @@ class StreamingProcessor {
                 this.reasoningHandler.updateReasoning(this.messageId, state?.reasoning);
                 this.images = state?.images ?? [];
                 this.reasoningSignature = state?.signature ?? null;
+                if (cacheUsage) {
+                    this.cacheUsage = cacheUsage;
+                }
                 await eventSource.emit(event_types.STREAM_TOKEN_RECEIVED, text);
                 await sw.tick(async () => await this.onProgressStreaming(this.messageId, this.continueMessage + text));
             }
@@ -6255,6 +6211,8 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
             displayIncompleteSentences: displayIncomplete,
         });
 
+        const cacheUsage = extractCacheUsage(data);
+
         if (isImpersonate) {
             $('#send_textarea').val(getMessage)[0].dispatchEvent(new Event('input', { bubbles: true }));
             await eventSource.emit(event_types.IMPERSONATE_READY, getMessage);
@@ -6264,9 +6222,9 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         } else {
             // Without streaming we'll be having a full message on continuation. Treat it as a last chunk.
             if (originalType !== 'continue') {
-                ({ type, getMessage } = await saveReply({ type, getMessage, title, swipes, reasoning, imageUrls, reasoningSignature }));
+                ({ type, getMessage } = await saveReply({ type, getMessage, title, swipes, reasoning, imageUrls, reasoningSignature, cacheUsage }));
             } else {
-                ({ type, getMessage } = await saveReply({ type: 'appendFinal', getMessage, title, swipes, reasoning, imageUrls, reasoningSignature }));
+                ({ type, getMessage } = await saveReply({ type: 'appendFinal', getMessage, title, swipes, reasoning, imageUrls, reasoningSignature, cacheUsage }));
             }
 
             // This relies on `saveReply` having been called to add the message to the chat, so it must be last.
@@ -7543,6 +7501,19 @@ async function processImageAttachment(message, { imageUrls }) {
 }
 
 /**
+ * Stores or clears normalized cache usage on a message extra object.
+ * @param {ChatMessageExtra} extra Message extra
+ * @param {import('./scripts/cache-usage.js').CacheUsage|null} cacheUsage Normalized cache usage
+ */
+function setMessageCacheUsage(extra, cacheUsage) {
+    if (cacheUsage) {
+        extra.cache_usage = cacheUsage;
+    } else {
+        delete extra.cache_usage;
+    }
+}
+
+/**
  * Saves a resulting message to the chat.
  * @param {SaveReplyParams} params
  * @returns {Promise<SaveReplyResult>} Promise when the message is saved
@@ -7556,16 +7527,17 @@ async function processImageAttachment(message, { imageUrls }) {
  * @property {string} [reasoning] Message reasoning
  * @property {string[]} [imageUrls] Links to images
  * @property {string?} [reasoningSignature] Encrypted signature of the reasoning text
+ * @property {import('./scripts/cache-usage.js').CacheUsage|null} [cacheUsage] Normalized prompt cache usage
  *
  * @typedef {object} SaveReplyResult
  * @property {string} type Type of generation
  * @property {string} getMessage Generated message
  */
-export async function saveReply({ type, getMessage, fromStreaming = false, title = '', swipes = [], reasoning = '', imageUrls = [], reasoningSignature = null }) {
+export async function saveReply({ type, getMessage, fromStreaming = false, title = '', swipes = [], reasoning = '', imageUrls = [], reasoningSignature = null, cacheUsage = null }) {
     // Backward compatibility
     if (arguments.length > 1 && typeof arguments[0] !== 'object') {
         console.trace('saveReply called with positional arguments. Please use an object instead.');
-        [type, getMessage, fromStreaming, title, swipes, reasoning, imageUrls, reasoningSignature] = arguments;
+        [type, getMessage, fromStreaming, title, swipes, reasoning, imageUrls, reasoningSignature, cacheUsage] = arguments;
     }
 
     const lastMessage = chat[chat.length - 1];
@@ -7604,6 +7576,7 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
             lastMessage.extra.reasoning = reasoning;
             lastMessage.extra.reasoning_duration = null;
             lastMessage.extra.reasoning_signature = reasoningSignature;
+            setMessageCacheUsage(lastMessage.extra, cacheUsage);
             await processImageAttachment(lastMessage, { imageUrls });
             if (power_user.message_token_count_enabled) {
                 const tokenCountText = (reasoning || '') + lastMessage.mes;
@@ -7629,6 +7602,7 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
         lastMessage.extra.reasoning = reasoning;
         lastMessage.extra.reasoning_duration = null;
         lastMessage.extra.reasoning_signature = reasoningSignature;
+        setMessageCacheUsage(lastMessage.extra, cacheUsage);
         await processImageAttachment(lastMessage, { imageUrls });
         if (power_user.message_token_count_enabled) {
             const tokenCountText = (reasoning || '') + lastMessage.mes;
@@ -7650,6 +7624,7 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
         lastMessage.extra.model = getGeneratingModel();
         lastMessage.extra.reasoning += reasoning;
         lastMessage.extra.reasoning_signature = reasoningSignature;
+        setMessageCacheUsage(lastMessage.extra, cacheUsage);
         await processImageAttachment(lastMessage, { imageUrls });
         // We don't know if the reasoning duration extended, so we don't update it here on purpose.
         if (power_user.message_token_count_enabled) {
@@ -7673,6 +7648,7 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
         newMessage.extra.reasoning = reasoning;
         newMessage.extra.reasoning_duration = null;
         newMessage.extra.reasoning_signature = reasoningSignature;
+        setMessageCacheUsage(newMessage.extra, cacheUsage);
         if (power_user.trim_spaces) {
             getMessage = getMessage.trim();
         }

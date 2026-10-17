@@ -1,0 +1,110 @@
+<div id="ne_wizard">
+    <div id="ne_step_source" class="ne_step">
+        <h4 class="ne_step_title"><span class="ne_step_no">1</span><span data-i18n="Pick a source chat">Pick a source chat</span></h4>
+        <div class="ne_row">
+            <label class="ne_label" for="ne_source_select" data-i18n="Character / group">Character / group</label>
+            <select id="ne_source_select" class="ne_select"></select>
+        </div>
+        <div class="ne_row">
+            <label class="ne_label" for="ne_chat_select" data-i18n="Chat to load">Chat to load</label>
+            <select id="ne_chat_select" class="ne_select"></select>
+        </div>
+        <div id="ne_chat_info" class="ne_hint"></div>
+    </div>
+
+    <div id="ne_step_npc" class="ne_step">
+        <h4 class="ne_step_title"><span class="ne_step_no">2</span><span data-i18n="Choose the NPC to extract">Choose the NPC to extract</span></h4>
+        <div class="ne_row">
+            <input id="ne_npc_input" class="text_pole" type="text" autocomplete="off" spellcheck="false">
+        </div>
+        <div id="ne_npc_candidates" class="ne_chips"></div>
+        <div class="ne_actions">
+            <a id="ne_btn_extract" class="menu_button interactable">
+                <div class="fa-solid fa-wand-magic-sparkles extensionsMenuExtensionButton"></div>
+                <span data-i18n="Extract with LLM">Extract with LLM</span>
+            </a>
+            <a id="ne_btn_manual" class="menu_button interactable">
+                <div class="fa-solid fa-pen-to-square extensionsMenuExtensionButton"></div>
+                <span data-i18n="Skip LLM, fill in manually">Skip LLM, fill in manually</span>
+            </a>
+        </div>
+    </div>
+
+    <div id="ne_step_progress" class="ne_step" style="display: none;">
+        <h4 class="ne_step_title"><span class="ne_step_no">3</span><span data-i18n="Extracting persona…">Extracting persona…</span></h4>
+        <div id="ne_progress_text" class="ne_hint"></div>
+        <div class="ne_progress"><div id="ne_progress_fill"></div></div>
+    </div>
+
+    <div id="ne_step_review" class="ne_step" style="display: none;">
+        <h4 class="ne_step_title"><span class="ne_step_no">4</span><span data-i18n="Review and save">Review and save</span></h4>
+
+        <div class="ne_grid">
+            <div class="ne_field">
+                <label for="ne_f_name" data-i18n="Character name">Character name</label>
+                <input id="ne_f_name" class="text_pole" type="text" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="ne_field">
+                <label for="ne_f_personality" data-i18n="Personality summary">Personality summary</label>
+                <textarea id="ne_f_personality" class="text_pole textarea_compact" rows="3"></textarea>
+            </div>
+            <div class="ne_field ne_span2">
+                <label for="ne_f_description" data-i18n="Description (persona)">Description (persona)</label>
+                <textarea id="ne_f_description" class="text_pole textarea_compact" rows="8"></textarea>
+            </div>
+            <div class="ne_field ne_span2">
+                <label for="ne_f_scenario" data-i18n="Scenario (NPC)">Scenario (NPC)</label>
+                <textarea id="ne_f_scenario" class="text_pole textarea_compact" rows="4"></textarea>
+            </div>
+            <div class="ne_field ne_span2">
+                <label for="ne_f_first_mes" data-i18n="First message">First message</label>
+                <textarea id="ne_f_first_mes" class="text_pole textarea_compact" rows="6"></textarea>
+            </div>
+            <div class="ne_field ne_span2">
+                <label for="ne_f_mes_example" data-i18n="Example messages">Example messages</label>
+                <textarea id="ne_f_mes_example" class="text_pole textarea_compact" rows="6"></textarea>
+            </div>
+            <div class="ne_field ne_span2">
+                <label for="ne_f_creator_notes" data-i18n="Creator's note">Creator's note</label>
+                <textarea id="ne_f_creator_notes" class="text_pole textarea_compact" rows="3"></textarea>
+            </div>
+        </div>
+
+        <div class="ne_carry_box">
+            <div class="ne_carry_title" data-i18n="Carry over from the source card">Carry over from the source card</div>
+            <div class="ne_carry_row">
+                <label class="checkbox_label"><input id="ne_carry_system_prompt" type="checkbox"><span data-i18n="Source card system prompt">Source card system prompt</span></label>
+                <label class="checkbox_label"><input id="ne_carry_post_history_instructions" type="checkbox"><span data-i18n="Source card post-history instructions">Source card post-history instructions</span></label>
+                <label class="checkbox_label"><input id="ne_carry_tags" type="checkbox"><span data-i18n="Source card tags">Source card tags</span></label>
+                <label class="checkbox_label"><input id="ne_carry_creator" type="checkbox"><span data-i18n="Source card creator">Source card creator</span></label>
+            </div>
+        </div>
+
+        <div class="ne_row">
+            <label class="ne_label" for="ne_lorebook_select" data-i18n="World book source">World book source</label>
+            <select id="ne_lorebook_select" class="ne_select"></select>
+        </div>
+        <div id="ne_book_info" class="ne_hint"></div>
+
+        <div class="ne_row">
+            <label class="ne_label" for="ne_avatar_select" data-i18n="Avatar for the new card">Avatar for the new card</label>
+            <select id="ne_avatar_select" class="ne_select">
+                <option value="source" data-i18n="Source card avatar">Source card avatar</option>
+                <option value="npc" data-i18n="NPC's own avatar (group chat only)">NPC's own avatar (group chat only)</option>
+                <option value="default" data-i18n="Default avatar">Default avatar</option>
+            </select>
+        </div>
+
+        <div class="ne_actions">
+            <a id="ne_btn_save" class="menu_button interactable">
+                <div class="fa-solid fa-floppy-disk extensionsMenuExtensionButton"></div>
+                <span data-i18n="Save as new character">Save as new character</span>
+            </a>
+            <a id="ne_btn_save_download" class="menu_button interactable">
+                <div class="fa-solid fa-download extensionsMenuExtensionButton"></div>
+                <span data-i18n="Save and download PNG">Save and download PNG</span>
+            </a>
+        </div>
+        <div id="ne_save_info" class="ne_hint"></div>
+    </div>
+</div>

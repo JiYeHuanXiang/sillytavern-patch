@@ -17,6 +17,7 @@ public/instruct/
 public/context/
 public/scripts/extensions/third-party/*
 !public/scripts/extensions/third-party/onebot-bridge
+!public/scripts/extensions/third-party/npc-extractor
 public/stats.json
 /uploads/
 *.jsonl

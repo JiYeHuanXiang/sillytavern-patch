@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 [![Upstream](https://img.shields.io/badge/based%20on-SillyTavern%201.19.0-orange.svg)](https://github.com/SillyTavern/SillyTavern)
-[![Version](https://img.shields.io/badge/version-1.19.0--patch--3-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.19.0--patch--3.1-brightgreen.svg)](CHANGELOG.md)
 
 基于 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 的个人定制分支，针对**国内模型**与**大量角色卡**使用场景做了针对性改进。
 
@@ -38,6 +38,7 @@
 - **预设行动选项过滤**：可选过滤角色卡附加在 AI 消息末尾的预设行动块（如「1.继续交谈 2.离开现场」）及其引导语（如「请选择你的行动：」），显示与发送给模型的提示词同步过滤，聊天文件不被修改；仅当块内含至少两个编号选项时才移除，普通编号段落不受影响。
 - **Reasoning 预填充**：提示词管理器支持 assistant 角色的 Reasoning Prefill 字段，随请求以 `reasoning_content` 发送，用于引导模型推理的起点，令牌计数纳入统计。
 - **提示词缓存开关与 DeepSeek 缓存诊断**：Custom 源新增「启用提示词缓存」开关（注入 Anthropic/Gemini 风格 `cache_control`，配合 `config.yaml` 缓存配置）；DeepSeek 源新增缓存诊断面板，展示命中 / 未命中 tokens、命中率与断点消息定位。
+- **消息缓存命中率徽标**：每条 AI 消息在角色名旁显示缓存命中徽标（如「缓存命中 87%」），悬停可看命中 tokens / 总 prompt tokens；统一解析 DeepSeek、OpenAI 兼容、Anthropic、Gemini 四种 usage 结构，流式与非流式生成均生效，并随聊天保存。
 - **HTML 渲染模式切换**：HTML 沙箱预览功能提供「补丁版 / 原版」渲染模式下拉框，可一键切回上游 Markdown + DOMPurify 行为，切换后重载当前聊天即时生效。
 - **用户消息「禁止转译」**：可选让用户发送消息中的 `*`、`#` 等 Markdown 字符按原样显示，不再被解析为格式；仅作用于用户消息，AI 回复与角色卡首条消息不受影响。
 - **拓展插件 zip 导入**：拓展设置面板新增「导入拓展」按钮，选择 zip 压缩包即可安装第三方拓展；服务端严格校验（manifest 合法性、拒绝路径穿越 / 符号链接、限制压缩包大小与解压总量防 zip 炸弹）。

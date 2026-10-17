@@ -6207,6 +6207,20 @@ body:not(.movingUI) .drawer-content.maximized {
     font-weight: 400;
 }
 
+.mes_cache_hit_rate {
+    font-size: calc(var(--mainFontSize) * 0.7);
+    font-weight: 400;
+    color: var(--grey70);
+    margin-left: 0.4em;
+    white-space: nowrap;
+    cursor: help;
+    opacity: 0.85;
+}
+
+.mes_cache_hit_rate:empty {
+    display: none;
+}
+
 .lastInContext {
     border-top: 3px dotted var(--SmartThemeQuoteColor) !important;
 }

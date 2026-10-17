@@ -1,0 +1,19 @@
+<div id="npc_extractor_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b data-i18n="NPC Character Extractor">NPC Character Extractor</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div class="ne_setting_row">
+                <label for="ne_opt_chunk_chars" data-i18n="Chat length limit per LLM request (chars)">Chat length limit per LLM request (chars)</label>
+                <input id="ne_opt_chunk_chars" class="text_pole" type="number" min="4000" max="200000" step="1000">
+            </div>
+            <div class="ne_setting_row">
+                <label for="ne_opt_response_length" data-i18n="Max tokens per LLM request">Max tokens per LLM request</label>
+                <input id="ne_opt_response_length" class="text_pole" type="number" min="256" max="8192" step="64">
+            </div>
+            <div class="ne_hint" data-i18n="Extract an NPC that appeared in a chat log into a new character card. The embedded world book of the chosen source card is carried over. Open the wand menu and click Extract NPC to start.">Extract an NPC that appeared in a chat log into a new character card. The embedded world book of the chosen source card is carried over. Open the wand menu and click Extract NPC to start.</div>
+        </div>
+    </div>
+</div>
