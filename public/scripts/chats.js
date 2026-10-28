@@ -335,7 +335,9 @@ export async function getFileAttachment(url) {
         const text = await result.text();
         return text;
     } catch (error) {
-        toastr.error(error, t`Could not download file`);
+        // toastr only accepts strings; passing the Error object throws inside the
+        // catch block and leaves generation stuck with the send button hidden.
+        toastr.error(String(error?.message ?? error), t`Could not download file`);
         console.error('Could not download file', error);
         return '';
     }

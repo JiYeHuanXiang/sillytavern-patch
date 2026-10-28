@@ -1552,6 +1552,35 @@ export function parseReasoningInSwipes(swipes, swipeInfoArray, duration) {
     }
 }
 
+/**
+ * Attach model-provided reasoning to each generated swipe.
+ * Only the first choice used to keep its reasoning; the rest were saved without it.
+ * @param {{extra: Partial<ReasoningMessageExtra>}[]} swipeInfoArray Array of swipe info objects
+ * @param {{reasoning?: string, signature?: string, duration?: number}[]} swipeStates Per-choice reasoning state
+ */
+export function saveReasoningInSwipes(swipeInfoArray, swipeStates) {
+    if (!Array.isArray(swipeInfoArray) || !Array.isArray(swipeStates)) {
+        return;
+    }
+
+    for (let index = 0; index < swipeInfoArray.length && index < swipeStates.length; index++) {
+        const state = swipeStates[index];
+        if (!state?.reasoning) {
+            continue;
+        }
+
+        const extra = swipeInfoArray[index].extra ??= {};
+        extra.reasoning = state.reasoning;
+        extra.reasoning_type = ReasoningType.Model;
+        if (state.signature) {
+            extra.reasoning_signature = state.signature;
+        }
+        if (typeof state.duration === 'number') {
+            extra.reasoning_duration = state.duration;
+        }
+    }
+}
+
 function registerReasoningAppEvents() {
     const eventHandler = (/** @type {string} */ type, /** @type {number} */ idx) => {
         if (!power_user.reasoning.auto_parse) {

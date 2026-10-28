@@ -246,6 +246,7 @@ import {
     formatInstructModeStoryString,
     getInstructStoppingSequences,
 } from './scripts/instruct-mode.js';
+import { stripInstructTurnSequences } from './scripts/instruct-turn.js';
 import { initLocales, t } from './scripts/i18n.js';
 import { getFriendlyTokenizerName, getTokenCount, getTokenCountAsync, initTokenizers, saveTokenCache } from './scripts/tokenizers.js';
 import {
@@ -285,7 +286,7 @@ import { initServerHistory } from './scripts/server-history.js';
 import { initSettingsSearch } from './scripts/setting-search.js';
 import { initBulkEdit } from './scripts/bulk-edit.js';
 import { getContext } from './scripts/st-context.js';
-import { extractReasoningFromData, extractReasoningSignatureFromData, initReasoning, parseReasoningInSwipes, PromptReasoning, ReasoningHandler, removeReasoningFromString, updateReasoningUI } from './scripts/reasoning.js';
+import { extractReasoningFromData, extractReasoningSignatureFromData, initReasoning, parseReasoningInSwipes, PromptReasoning, ReasoningHandler, removeReasoningFromString, saveReasoningInSwipes, updateReasoningUI } from './scripts/reasoning.js';
 import { accountStorage } from './scripts/util/AccountStorage.js';
 import { initWelcomeScreen, openPermanentAssistantChat, openPermanentAssistantCard, getPermanentAssistantAvatar } from './scripts/welcome-screen.js';
 import { initDataMaid } from './scripts/data-maid.js';
@@ -296,6 +297,7 @@ import { initAccessibility } from './scripts/a11y.js';
 import { applyStreamFadeIn } from './scripts/util/stream-fadein.js';
 import { initDomHandlers } from './scripts/dom-handlers.js';
 import { SimpleMutex } from './scripts/util/SimpleMutex.js';
+import { GENERATION_STOP_FALLBACK_MS, IdleWatchdog, STREAM_TIMEOUTS, withTimeout } from './scripts/util/idle-watchdog.js';
 import { AudioPlayer } from './scripts/audio-player.js';
 import { MacroEnvBuilder } from './scripts/macros/engine/MacroEnvBuilder.js';
 import { MessageFormatter } from './scripts/message-formatter.js';
@@ -433,6 +435,11 @@ export let swipeState = SWIPE_STATE.NONE;
 let chatSaveTimeout;
 let importFlashTimeout;
 export let isChatSaving = false;
+/**
+ * True while a chat is being loaded and the in-memory chat may be empty or partial.
+ * Saves are refused in this state to avoid overwriting a healthy file.
+ */
+export let isChatLoading = false;
 let firstRun = false;
 export let settingsReady = false;
 let currentVersion = '0.0.0';
@@ -628,6 +635,15 @@ export let online_status = 'no_connection';
 
 export let is_send_press = false; //Send generation
 export const isGenerating = () => (is_send_press || is_group_generating);
+
+/**
+ * Monotonic id of the latest generation started, and the ids of the generations that currently
+ * hold the send/stop UI. The UI may only be released once every generation that took it has
+ * settled, so a stale callback (or a forced unlock) can never clear the lock of a newer one.
+ */
+let generationSequence = 0;
+const activeGenerationIds = new Set();
+let generationStopFallbackTimer = null;
 
 let this_del_mes = -1;
 let deleteToolCallsInDeleteMode = true;
@@ -1836,7 +1852,10 @@ export async function clearChat({ clearData = false } = {}) {
     await saveItemizedPrompts(getCurrentChatId());
     itemizedPrompts.length = 0;
 
-    if (clearData) chat.length = 0;
+    if (clearData) {
+        chat.length = 0;
+        isChatLoading = true;
+    }
 }
 
 export async function deleteLastMessage() {
@@ -2000,9 +2019,20 @@ export async function sendTextareaMessage() {
         await newAssistantChat({ temporary: false });
     }
 
-    let generation = await Generate(generateType);
-    showSwipeButtons();
-    return generation;
+    try {
+        let generation = await Generate(generateType);
+        showSwipeButtons();
+        return generation;
+    } catch (error) {
+        console.error('Failed to send message', error);
+        // Failures after the request reached the API are already reported by onError. Anything
+        // earlier (a failure before the generation started) would otherwise be silent.
+        if (!error?.error && !error?.isApiError) {
+            const message = error?.message || error?.statusText || t`Unknown error`;
+            toastr.error(String(message), t`Failed to send message`, { preventDuplicates: true });
+        }
+        throw error;
+    }
 }
 
 /**
@@ -3085,6 +3115,7 @@ export function addOneMessage(mes, { type = undefined, insertAfter = null, scrol
     })();
 
     let messageElement;
+    const previousLastMessageElement = chatElement.children('.mes').last();
 
     if (type === 'swipe') {
         // Forbidden black magic
@@ -3110,9 +3141,15 @@ export function addOneMessage(mes, { type = undefined, insertAfter = null, scrol
 
     //last_mes should always be updated.
     chatElement.find('.mes').removeClass('last_mes');
-    chatElement.find('.mes').last().addClass('last_mes');
+    const currentLastMessageElement = chatElement.find('.mes').last();
+    currentLastMessageElement.addClass('last_mes');
 
-    if (showSwipes) refreshSwipeButtons();
+    // The previous last message is no longer the overswipe target.
+    if (currentLastMessageElement[0] !== previousLastMessageElement[0]) {
+        previousLastMessageElement.removeClass('last_swipe');
+    }
+
+    if (showSwipes) refreshSwipeButtonForMessage(messageId);
     // Don't scroll if not inserting last
     if (!insertAfter && !insertBefore && scroll) {
         scrollChatToBottom({ waitForFrame: true });
@@ -4125,6 +4162,10 @@ class StreamingProcessor {
         this.force_name2 = forceName2;
         this.isStopped = false;
         this.isFinished = false;
+        /** Set when the idle watchdog ended the stream; keeps the partial text but suppresses continuation. */
+        this.timedOut = false;
+        /** Id of the generation that created this processor. */
+        this.generationId = 0;
         this.generator = this.nullStreamingGeneration;
         this.abortController = new AbortController();
         this.firstMessageText = '...';
@@ -4134,6 +4175,7 @@ class StreamingProcessor {
         this.createdAt = new Date();
         this.continueMessage = type === 'continue' ? continueMessage : '';
         this.swipes = [];
+        this.swipeStates = [];
         /** @type {import('./scripts/logprobs.js').TokenLogprobs[]} */
         this.messageLogprobs = [];
         this.toolCalls = [];
@@ -4336,6 +4378,8 @@ class StreamingProcessor {
             delete swipeInfoExtra.token_count;
             delete swipeInfoExtra.reasoning;
             delete swipeInfoExtra.reasoning_duration;
+            delete swipeInfoExtra.reasoning_type;
+            delete swipeInfoExtra.reasoning_signature;
             const swipeInfo = {
                 send_date: message.send_date,
                 gen_started: message.gen_started,
@@ -4344,6 +4388,7 @@ class StreamingProcessor {
             };
             const swipeInfoArray = Array(this.swipes.length).fill().map(() => structuredClone(swipeInfo));
             parseReasoningInSwipes(this.swipes, swipeInfoArray, message.extra?.reasoning_duration);
+            saveReasoningInSwipes(swipeInfoArray, this.swipeStates);
             message.swipes.push(...this.swipes);
             message.swipe_info.push(...swipeInfoArray);
         }
@@ -4380,12 +4425,35 @@ class StreamingProcessor {
         await this.finalizeIntermediaryMessage(messageId, text, { unlockUI: true });
 
         const isAborted = this.abortController.signal.aborted;
-        if (!isAborted && power_user.auto_swipe && generatedTextFiltered(text)) {
+        if (!isAborted && !this.timedOut && power_user.auto_swipe && generatedTextFiltered(text)) {
             return await swipe(null, SWIPE_DIRECTION.RIGHT, { source: SWIPE_SOURCE.AUTO_SWIPE, repeated: true, forceMesId: chat.length - 1 });
         }
         await saveChatConditional();
 
         playMessageSound();
+    }
+
+    /**
+     * Ends a stream that stopped producing data. The partial reply is kept, but the generation is
+     * marked as timed out so it cannot chain into auto-continue / auto-swipe.
+     */
+    onStalled() {
+        if (this.isFinished || this.isStopped) {
+            return;
+        }
+
+        console.warn(`[ST] Streaming stalled with no data for the configured timeout. type=${this.type} messageId=${this.messageId}`);
+        toastr.warning(
+            t`The API stopped sending data. Generation was stopped and the partial reply was kept.`,
+            t`Generation timed out`,
+            { preventDuplicates: true },
+        );
+        this.timedOut = true;
+        this.isFinished = true;
+        this.abortController.abort(new Error('Stream idle timeout'));
+        // Aborting only rejects the reader. If the stall is in an awaited event listener, the loop
+        // may never resume, so release the UI here as well (idempotent with the normal finish path).
+        this.markUIGenStopped();
     }
 
     onErrorStreaming() {
@@ -4440,10 +4508,19 @@ class StreamingProcessor {
         const isContinue = this.type == 'continue';
         this.stoppingStrings = getStoppingStrings(isImpersonate, isContinue, main_api);
 
+        // No data at all means a dead stream: the upstream may keep the SSE connection open
+        // without ever sending [DONE] or closing it, and reader.read() would wait forever.
+        const watchdog = new IdleWatchdog({
+            timeoutMs: () => (this.timeToFirstToken ? STREAM_TIMEOUTS.idleMs : STREAM_TIMEOUTS.firstTokenMs),
+            onExpire: () => this.onStalled(),
+        });
+        watchdog.arm();
+
         try {
             const sw = new Stopwatch(1000 / power_user.streaming_fps);
             const timestamps = [];
-            for await (const { text, swipes, logprobs, toolCalls, state, cacheUsage } of this.generator()) {
+            for await (const { text, swipes, swipeStates, logprobs, toolCalls, state, cacheUsage } of this.generator()) {
+                watchdog.touch();
                 const now = Date.now();
                 timestamps.push(now);
                 if (!this.timeToFirstToken) {
@@ -4456,6 +4533,7 @@ class StreamingProcessor {
                 this.toolCalls = toolCalls;
                 this.result = text;
                 this.swipes = Array.from(swipes ?? []);
+                this.swipeStates = Array.from(swipeStates ?? []);
                 if (logprobs) {
                     this.messageLogprobs.push(...(Array.isArray(logprobs) ? logprobs : [logprobs]));
                 }
@@ -4478,6 +4556,8 @@ class StreamingProcessor {
                 this.onErrorStreaming();
             }
             return this.result;
+        } finally {
+            watchdog.dispose();
         }
 
         this.isFinished = true;
@@ -4861,7 +4941,47 @@ function removeLastMessage() {
  * @param {boolean} dryRun Whether to actually generate a message or just assemble the prompt
  * @returns {Promise<any>} Returns a promise that resolves when the text is done generating.
  */
-export async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, quietToLoud, skipWIAN, force_chid, signal, quietImage, quietName, jsonSchema = null, depth = 0 } = {}, dryRun = false) {
+export async function Generate(type, options = {}, dryRun = false) {
+    /** @type {{ id: number, type: string, ownsUiLock: boolean, abortController?: AbortController }} */
+    const context = { id: ++generationSequence, type, ownsUiLock: false };
+
+    try {
+        return await generateInternal(context, type, options, dryRun);
+    } finally {
+        // Normal completions clear is_send_press before resolving, so this only fires when the
+        // generation failed or was abandoned while the UI was still locked. Waiting for every
+        // active generation keeps a quiet/overlapping generation from unlocking too early.
+        if (context.ownsUiLock) {
+            activeGenerationIds.delete(context.id);
+
+            if (activeGenerationIds.size === 0) {
+                clearGenerationStopFallback();
+
+                if (is_send_press || document.body.dataset.generating) {
+                    console.warn('[ST] Generation settled with the UI still locked, force-releasing', type);
+                    unblockGeneration(type, { force: true });
+                }
+            }
+        } else if (!dryRun && activeGenerationIds.size === 0 && is_send_press && !document.body.dataset.generating) {
+            // The generation failed before it could take over the UI. Callers (send button,
+            // regenerate, continue) claim the lock before calling Generate, so release it here.
+            console.warn('[ST] Generation failed before taking the UI lock, releasing the pre-lock', type);
+            is_send_press = false;
+            showSwipeButtons();
+            syncSendButtons();
+        }
+    }
+}
+
+/**
+ * Generation body. Always called through {@link Generate} so UI ownership is tracked.
+ * @param {{ id: number, type: string, ownsUiLock: boolean, abortController?: AbortController }} context Generation context
+ * @param {string} type Generation type
+ * @param {GenerateOptions} options Generation options
+ * @param {boolean} dryRun Whether to actually generate a message or just assemble the prompt
+ * @returns {Promise<any>} Returns a promise that resolves when the text is done generating.
+ */
+async function generateInternal(context, type, { automatic_trigger, force_name2, quiet_prompt, quietToLoud, skipWIAN, force_chid, signal, quietImage, quietName, jsonSchema = null, depth = 0 } = {}, dryRun = false) {
     console.log('Generate entered');
     setGenerationProgress(0);
     generation_started = new Date();
@@ -5001,6 +5121,9 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
     }
 
     if (!dryRun) {
+        context.ownsUiLock = true;
+        context.abortController = abortController;
+        activeGenerationIds.add(context.id);
         deactivateSendButtons();
     }
 
@@ -6073,15 +6196,32 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
 
         console.debug(`pushed prompt bits to itemizedPrompts array. Length is now: ${itemizedPrompts.length}`);
 
+        // A stop that happened while the prompt was being assembled must not still fire a request.
+        if (context.abortController?.signal?.aborted) {
+            throw new Error('Generation was aborted.');
+        }
+
         if (isStreamingEnabled() && type !== 'quiet') {
             continue_mag = promptReasoning.removePrefix(continue_mag);
             streamingProcessor = new StreamingProcessor(type, force_name2, generation_started, continue_mag, promptReasoning);
+            streamingProcessor.generationId = context.id;
             if (isContinue) {
                 // Save reply does add cycle text to the prompt, so it's not needed here
                 streamingProcessor.firstMessageText = '';
             }
 
-            streamingProcessor.generator = await sendStreamingRequest(type, generate_data, { jsonSchema });
+            streamingProcessor.generator = await withTimeout(
+                sendStreamingRequest(type, generate_data, { jsonSchema }),
+                STREAM_TIMEOUTS.connectMs,
+                {
+                    message: 'The API did not start responding in time.',
+                    onTimeout: () => {
+                        console.warn('[ST] Streaming connect timeout, aborting the request', type);
+                        toastr.warning(t`The API did not start responding in time.`, t`Request timed out`, { preventDuplicates: true });
+                        streamingProcessor?.abortController.abort(new Error('Stream connect timeout'));
+                    },
+                },
+            );
 
             hideSwipeButtons();
             let getMessage = await streamingProcessor.generate();
@@ -6128,13 +6268,25 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
             }
 
             if (isStreamFinished) {
+                const wasTimedOut = streamingProcessor.timedOut;
                 await streamingProcessor.onFinishStreaming(streamingProcessor.messageId, getMessage);
                 streamingProcessor = null;
-                triggerAutoContinue(messageChunk, isImpersonate);
+                // A stalled stream keeps what it already produced, but must not chain into
+                // auto-continue and stall again right away.
+                if (!wasTimedOut) {
+                    triggerAutoContinue(messageChunk, isImpersonate);
+                }
                 return Object.defineProperties(new String(getMessage), {
                     'messageChunk': { value: messageChunk },
                     'fromStream': { value: true },
                 });
+            }
+
+            // The stream ended without reaching a terminal state (error or abort before completion).
+            // Release the processor so it cannot block later quiet generations via unblockGeneration.
+            if (streamingProcessor) {
+                console.warn('[ST] Stream ended without a terminal state, releasing the processor', type);
+                streamingProcessor = null;
             }
         } else {
             return await sendGenerationRequest(type, generate_data, { jsonSchema });
@@ -6182,6 +6334,17 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         kobold_horde_model = title;
 
         const swipes = extractMultiSwipes(data, type);
+        const swipeStates = swipes.map((_, index) => {
+            const choice = Array.isArray(data?.choices) ? data.choices[index + 1] : null;
+            if (!choice) {
+                return {};
+            }
+            const choiceData = { ...data, choices: [choice] };
+            return {
+                reasoning: extractReasoningFromData(choiceData),
+                signature: extractReasoningSignatureFromData(choiceData),
+            };
+        });
 
         messageChunk = cleanUpMessage({
             getMessage: getMessage,
@@ -6222,9 +6385,9 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
         } else {
             // Without streaming we'll be having a full message on continuation. Treat it as a last chunk.
             if (originalType !== 'continue') {
-                ({ type, getMessage } = await saveReply({ type, getMessage, title, swipes, reasoning, imageUrls, reasoningSignature, cacheUsage }));
+                ({ type, getMessage } = await saveReply({ type, getMessage, title, swipes, swipeStates, reasoning, imageUrls, reasoningSignature, cacheUsage }));
             } else {
-                ({ type, getMessage } = await saveReply({ type: 'appendFinal', getMessage, title, swipes, reasoning, imageUrls, reasoningSignature, cacheUsage }));
+                ({ type, getMessage } = await saveReply({ type: 'appendFinal', getMessage, title, swipes, swipeStates, reasoning, imageUrls, reasoningSignature, cacheUsage }));
             }
 
             // This relies on `saveReply` having been called to add the message to the chat, so it must be last.
@@ -6264,8 +6427,13 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
 
         console.debug('/api/chats/save called by /Generate');
         await saveChatConditional();
-        unblockGeneration(type);
-        streamingProcessor = null;
+        // A superseded generation must not release the lock of the one that replaced it.
+        if (activeGenerationIds.has(context.id)) {
+            unblockGeneration(type);
+        }
+        if (streamingProcessor?.generationId === context.id) {
+            streamingProcessor = null;
+        }
 
         if (type !== 'quiet') {
             triggerAutoContinue(messageChunk, isImpersonate);
@@ -6286,9 +6454,13 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
             toastr.error(exception.error.message, t`Text generation error`, { timeOut: 10000, extendedTimeOut: 20000 });
         }
 
-        unblockGeneration(type);
+        if (activeGenerationIds.has(context.id)) {
+            unblockGeneration(type);
+        }
         console.log(exception);
-        streamingProcessor = null;
+        if (streamingProcessor?.generationId === context.id) {
+            streamingProcessor = null;
+        }
         throw exception;
     }
 }
@@ -6298,6 +6470,7 @@ export async function Generate(type, { automatic_trigger, force_name2, quiet_pro
  * Stops the generation and any streaming if it is currently running.
  */
 export function stopGeneration() {
+    const wasGenerating = isGenerating() || !!document.body.dataset.generating || !!streamingProcessor;
     let stopped = false;
     if (streamingProcessor) {
         streamingProcessor.onStopStreaming();
@@ -6308,8 +6481,68 @@ export function stopGeneration() {
         hideStopButton();
         stopped = true;
     }
+    if (stopped && wasGenerating) {
+        scheduleGenerationStopFallback();
+    }
     eventSource.emit(event_types.GENERATION_STOPPED);
     return stopped;
+}
+
+/**
+ * Clears the pending post-stop fallback, if any.
+ */
+function clearGenerationStopFallback() {
+    if (generationStopFallbackTimer) {
+        clearTimeout(generationStopFallbackTimer);
+        generationStopFallbackTimer = null;
+    }
+}
+
+/**
+ * Aborting is only a request: if the pending step is not abortable (a tokenizer request, a hung
+ * event listener, a save), the generation promise may never settle and the UI would stay locked
+ * with both the send and the stop button hidden. Force-release after a short grace period.
+ */
+function scheduleGenerationStopFallback() {
+    clearGenerationStopFallback();
+
+    const pendingIds = [...activeGenerationIds];
+    generationStopFallbackTimer = setTimeout(() => {
+        generationStopFallbackTimer = null;
+
+        if (!is_send_press && !document.body.dataset.generating) {
+            return;
+        }
+
+        // Everything that was running at stop time has already settled, or was replaced by a
+        // newer generation that now owns the UI. An empty snapshot means the lock was claimed
+        // before any generation started (a caller-side pre-lock), which is safe to release.
+        if (pendingIds.length === 0 && activeGenerationIds.size > 0) {
+            return;
+        }
+        if (pendingIds.length > 0 && !pendingIds.some(id => activeGenerationIds.has(id))) {
+            return;
+        }
+
+        console.warn('[ST] Generation did not settle after stop, force-releasing the UI');
+        toastr.warning(t`The request did not stop in time and was force-closed.`, t`Generation stopped`, { preventDuplicates: true });
+        activeGenerationIds.clear();
+        streamingProcessor = null;
+        resetSwipeState();
+        unblockGeneration(undefined, { force: true });
+    }, GENERATION_STOP_FALLBACK_MS);
+}
+
+/**
+ * Resets the swipe state machine when a swipe is aborted or fails.
+ */
+function resetSwipeState() {
+    if (swipeState !== SWIPE_STATE.NONE) {
+        console.warn('[ST] Resetting a stuck swipe state', swipeState);
+        swipeState = SWIPE_STATE.NONE;
+    }
+    delete document.body.dataset.swiping;
+    showSwipeButtons();
 }
 
 /**
@@ -6382,10 +6615,12 @@ function flushWIInjections() {
 /**
  * Unblocks the UI after a generation is complete.
  * @param {string} [type] Generation type (optional)
+ * @param {object} [options] Options
+ * @param {boolean} [options.force] Release the UI even if the quiet-generation guard would skip it
  */
-function unblockGeneration(type) {
+function unblockGeneration(type, { force = false } = {}) {
     // Don't unblock if a parallel stream is still running
-    if (type === 'quiet' && streamingProcessor && !streamingProcessor.isFinished) {
+    if (!force && type === 'quiet' && streamingProcessor && !streamingProcessor.isFinished && !streamingProcessor.isStopped) {
         return;
     }
 
@@ -6578,7 +6813,9 @@ async function queryTimePerceptionDuration() {
     const max = getTimePerceptionMaxTimeout();
     const queryPrompt = getTimePerceptionQueryPrompt(min, max);
     try {
-        const answer = await generateQuietPrompt({ quietPrompt: queryPrompt, quietToLoud: false });
+        // Use a raw generation: it does not take over the send/stop UI and does not write to the
+        // chat, so a slow or stuck duration query can never leave the chat in a generating state.
+        const answer = await generateRaw({ prompt: queryPrompt, responseLength: 32 });
         const match = String(answer).match(/\d+(?:\.\d+)?/);
         if (match) {
             const minutes = Number(match[0]);
@@ -7420,9 +7657,10 @@ export function cleanUpMessage({ getMessage, isImpersonate, isContinue, displayI
             { value: power_user.instruct.output_sequence, apply: !isImpersonate && isNotEmpty(power_user.instruct.output_sequence) },
             { value: power_user.instruct.last_output_sequence, apply: !isImpersonate && isNotEmpty(power_user.instruct.last_output_sequence) },
         ];
-        for (const seq of sequences.filter(s => s.apply)) {
-            seq.value.split('\n').filter(line => line.trim() !== '').forEach(line => { getMessage = getMessage.replaceAll(line, ''); });
-        }
+        const sequenceLines = sequences
+            .filter(s => s.apply)
+            .flatMap(seq => seq.value.split('\n').filter(line => line.trim() !== ''));
+        getMessage = stripInstructTurnSequences(getMessage, sequenceLines, { continueMode: isContinue });
     }
 
     // clean-up group message from excessive generations
@@ -7524,6 +7762,7 @@ function setMessageCacheUsage(extra, cacheUsage) {
  * @property {boolean} [fromStreaming] If the message is from streaming
  * @property {string} [title] Message tooltip
  * @property {string[]} [swipes] Extra swipes
+ * @property {{reasoning?: string, signature?: string}[]} [swipeStates] Per-swipe reasoning state
  * @property {string} [reasoning] Message reasoning
  * @property {string[]} [imageUrls] Links to images
  * @property {string?} [reasoningSignature] Encrypted signature of the reasoning text
@@ -7533,7 +7772,7 @@ function setMessageCacheUsage(extra, cacheUsage) {
  * @property {string} type Type of generation
  * @property {string} getMessage Generated message
  */
-export async function saveReply({ type, getMessage, fromStreaming = false, title = '', swipes = [], reasoning = '', imageUrls = [], reasoningSignature = null, cacheUsage = null }) {
+export async function saveReply({ type, getMessage, fromStreaming = false, title = '', swipes = [], swipeStates = [], reasoning = '', imageUrls = [], reasoningSignature = null, cacheUsage = null }) {
     // Backward compatibility
     if (arguments.length > 1 && typeof arguments[0] !== 'object') {
         console.trace('saveReply called with positional arguments. Please use an object instead.');
@@ -7711,6 +7950,8 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
         delete swipeInfoExtra.token_count;
         delete swipeInfoExtra.reasoning;
         delete swipeInfoExtra.reasoning_duration;
+        delete swipeInfoExtra.reasoning_type;
+        delete swipeInfoExtra.reasoning_signature;
         const swipeInfo = {
             send_date: item.send_date,
             gen_started: item.gen_started,
@@ -7719,6 +7960,7 @@ export async function saveReply({ type, getMessage, fromStreaming = false, title
         };
         const swipeInfoArray = Array(swipes.length).fill().map(() => structuredClone(swipeInfo));
         parseReasoningInSwipes(swipes, swipeInfoArray, item.extra?.reasoning_duration);
+        saveReasoningInSwipes(swipeInfoArray, swipeStates);
         item.swipes.push(...swipes);
         item.swipe_info.push(...swipeInfoArray);
     }
@@ -7968,13 +8210,31 @@ export function getGeneratingModel(mes) {
 }
 
 /**
+ * Single source of truth for the visibility of the send / continue / impersonate buttons.
+ *
+ * `#send_but` used to be hidden by `.displayNone` when a connection check ran during a generation,
+ * and nothing re-synced it afterwards. Recomputing the class on every lock/connection transition
+ * keeps the button reachable on mobile, where it is the only send affordance.
+ */
+export function syncSendButtons() {
+    const connected = typeof online_status === 'string' && online_status !== 'no_connection';
+    // Message editing is intentionally not treated as locked: the button stays visible there and
+    // sendTextareaMessage() explains why sending is refused. Swiping is hidden via CSS instead.
+    const locked = is_send_press || (selected_group && is_group_generating);
+    const visible = connected && !locked;
+    $('#send_but, #mes_continue, #mes_impersonate').toggleClass('displayNone', !visible);
+}
+
+/**
  * A function mainly used to switch 'generating' state - setting it to false and activating the buttons again
  */
 export function activateSendButtons() {
     is_send_press = false;
+    clearGenerationStopFallback();
     hideStopButton();
     showSwipeButtons();
     delete document.body.dataset.generating;
+    syncSendButtons();
 }
 
 /**
@@ -7984,6 +8244,7 @@ export function deactivateSendButtons() {
     showStopButton();
     hideSwipeButtons();
     document.body.dataset.generating = 'true';
+    syncSendButtons();
 }
 
 export function resetChatState() {
@@ -8011,6 +8272,15 @@ export function setMenuType(value) {
 
 export function setExternalAbortController(controller) {
     abortController = controller;
+}
+
+/**
+ * Updates the chat-loading guard. Group chat loading uses this because its
+ * save path lives in group-chats.js.
+ * @param {boolean} value Whether a chat load is in progress.
+ */
+export function setChatLoading(value) {
+    isChatLoading = !!value;
 }
 
 /**
@@ -8319,6 +8589,13 @@ export async function saveChat({ chatName, withMetadata, mesId, force = false, c
         return;
     }
 
+    // A load clears the in-memory chat before the file arrives. Saving in that
+    // window would overwrite the file with an empty or partial chat.
+    if (isChatLoading) {
+        console.warn('saveChat skipped: the chat is still loading');
+        return;
+    }
+
     characters[this_chid].date_last_chat = Date.now();
 
     const trimmedChat = Array.isArray(chatData)
@@ -8558,12 +8835,13 @@ export async function unshallowCharacter(characterId) {
 }
 
 export async function getChat() {
+    isChatLoading = true;
     try {
         await unshallowCharacter(this_chid);
 
         const response = await fetch('/api/chats/get', {
             method: 'POST',
-            headers: getRequestHeaders(),
+            headers: { ...getRequestHeaders(), 'X-Require-Chat-Array': '1' },
             cache: 'no-cache',
             body: JSON.stringify({
                 ch_name: characters[this_chid].name,
@@ -8573,24 +8851,29 @@ export async function getChat() {
         });
 
         if (!response.ok) {
-            throw new Error('Chat could not be loaded');
+            throw new Error(`Chat request failed with status ${response.status}`);
         }
 
         const data = await response.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (!Array.isArray(data)) {
+            throw new Error('Chat response was not an array');
+        }
+
+        if (data.length > 0) {
             /** @type {ChatHeader} */
             const chatHeader = data.shift();
             chat_metadata = chatHeader?.chat_metadata ?? {};
             chat.splice(0, chat.length, ...data);
             chat.forEach(ensureMessageMediaIsArray);
         } else {
-            // An empty/corrupted chat file
+            // A missing or genuinely empty chat file.
             chat.splice(0, chat.length);
             chat_metadata = {};
         }
         if (!chat_metadata.integrity) {
             chat_metadata.integrity = uuidv4();
         }
+        isChatLoading = false;
         await getChatResult();
         eventSource.emit(event_types.CHAT_LOADED, { detail: { id: this_chid, character: characters[this_chid] } });
 
@@ -8602,8 +8885,10 @@ export async function getChat() {
             $('#send_textarea').trigger('click').trigger('focus');
         });
     } catch (error) {
-        await getChatResult();
+        // Fail closed: keep isChatLoading set so no save can replace the file
+        // with the greeting the empty in-memory chat would otherwise produce.
         console.error('Failed to load chat', error);
+        toastr.error(t`The chat file could not be loaded. Reload the page before continuing.`, t`Chat could not be loaded`);
     }
 }
 
@@ -10214,6 +10499,78 @@ export function getOverswipeBehavior(messageId, message = undefined) {
 }
 
 /**
+ * Applies the swipe state of one message to its mounted element.
+ * @param {HTMLElement} messageElement Message element
+ * @param {number} messageId Message ID
+ * @param {object} [options] Options
+ * @param {boolean} [options.updateCounters=false] Update the swipe counter too
+ * @param {boolean} [options.fade=true] Whether chevrons fade in and out
+ */
+function refreshSwipeButtonElement(messageElement, messageId, { updateCounters = false, fade = true } = {}) {
+    const message = chat[messageId];
+
+    // Chevrons should not fade-in during printMessages. //https://github.com/SillyTavern/SillyTavern/pull/4712#issuecomment-3539315919
+    messageElement.classList.toggle('fade', fade);
+
+    if (isMessageSwipeable(messageId, message)) {
+        // If a right swipe would trigger a generation or loop to the first swipe.
+        const isLastSwipe = (message?.swipes?.length ?? 1) - 1 <= (message?.swipe_id ?? 0);
+        const hasSwipes = (message?.swipes?.length > 1);
+        const overswipe = getOverswipeBehavior(messageId, message);
+        const swipePickerButton = $(messageElement).find('.mes_swipe_picker');
+        const canOpenSwipePicker = canOpenSwipePickerForMessage(messageId);
+
+        // Chevrons should always be shown on pristine greetings: https://github.com/SillyTavern/SillyTavern/pull/4712#issuecomment-3557893373
+        const pristineGreeting = overswipe == OVERSWIPE_BEHAVIOR.PRISTINE_GREETING;
+
+        // The swipe button will be shown if an overswipe would trigger REGENERATE or EDIT_GENERATE.
+        const isOverswipeable = isLastSwipe &&
+            overswipe == OVERSWIPE_BEHAVIOR.REGENERATE ||
+            overswipe == OVERSWIPE_BEHAVIOR.EDIT_GENERATE;
+
+        messageElement.classList.toggle('last_swipe', isOverswipeable);
+
+        // If there's only one swipe, the left arrow should not be shown.
+        messageElement.classList.toggle('swipes_visible', hasSwipes || pristineGreeting);
+        swipePickerButton.toggle(canOpenSwipePicker);
+
+        // updateSwipeCounter does not need to be awaited, It can run a bit later.
+        if (updateCounters) updateSwipeCounter(messageId, { message, messageElement: $(messageElement) });
+    } else {
+        // Hide all messages that are not swipeable.
+        messageElement.classList.remove('swipes_visible', 'last_swipe');
+        $(messageElement).find('.mes_swipe_picker').toggle(canOpenSwipePickerForMessage(messageId));
+    }
+}
+
+/**
+ * Refreshes the swipe state of a single mounted message. Appending a message
+ * should not require walking every message in a long chat.
+ * @param {number} messageId Message ID
+ * @param {object} [options] Options
+ * @param {boolean} [options.updateCounters=false] Update the swipe counter too
+ * @param {boolean} [options.fade=true] Whether chevrons fade in and out
+ * @returns {boolean} Whether a mounted element was updated
+ */
+export function refreshSwipeButtonForMessage(messageId, { updateCounters = false, fade = true } = {}) {
+    if (chat?.length === 0) return false;
+
+    if (!isSwipingAllowed()) {
+        $('body').addClass('hideAllSwipeButtons');
+        return false;
+    }
+    $('body').removeClass('hideAllSwipeButtons');
+
+    const messageElement = chatElement.children(`.mes[mesid="${Number(messageId)}"]`).get(0);
+    if (!(messageElement instanceof HTMLElement)) {
+        return false;
+    }
+
+    refreshSwipeButtonElement(messageElement, Number(messageId), { updateCounters, fade });
+    return true;
+}
+
+/**
  * Refreshes all swipe buttons and updates their swipe counters.
  * This has been optimized for bulk updates by minimizing DOM queries.
  * @param {boolean} updateCounters When true, the swipe counters will also be updated. Typically redundant because addOneMessage updates the counters.
@@ -10242,42 +10599,7 @@ export function refreshSwipeButtons(updateCounters = false, fade = true) {
     messageElements.each((index, div) => {
         //This assumes the messages are in order and their Id's are accurate.
         const messageId = firstDisplayedMesId + index;
-        //Number($(div).attr('mesid')); Would not misscount due to a missing div, but is much slower.
-
-        const message = chat[messageId];
-
-        //Chevrons should not fade-in during printMessages. //https://github.com/SillyTavern/SillyTavern/pull/4712#issuecomment-3539315919
-        div.classList.toggle('fade', fade);
-
-        if (isMessageSwipeable(messageId, message)) {
-            //If a right swipe would trigger a generation or loop to the first swipe.
-            const isLastSwipe = (message?.swipes?.length ?? 1) - 1 <= (message?.swipe_id ?? 0);
-            const hasSwipes = (message?.swipes?.length > 1);
-            const overswipe = getOverswipeBehavior(messageId, message);
-            const swipePickerButton = $(div).find('.mes_swipe_picker');
-            const canOpenSwipePicker = canOpenSwipePickerForMessage(messageId);
-
-            // Chevrons should always be shown on pristine greetings: https://github.com/SillyTavern/SillyTavern/pull/4712#issuecomment-3557893373
-            const pristineGreeting = overswipe == OVERSWIPE_BEHAVIOR.PRISTINE_GREETING;
-
-            //The swipe button will be shown if an overswipe would trigger REGENERATE or EDIT_GENERATE.
-            const isOverswipeable = isLastSwipe &&
-                overswipe == OVERSWIPE_BEHAVIOR.REGENERATE ||
-                overswipe == OVERSWIPE_BEHAVIOR.EDIT_GENERATE;
-
-            div.classList.toggle('last_swipe', isOverswipeable);
-
-            //If there's only one swipe, the left arrow should not be shown.
-            div.classList.toggle('swipes_visible', hasSwipes || pristineGreeting);
-            swipePickerButton.toggle(canOpenSwipePicker);
-
-            //updateSwipeCounter does not need to be awaited, It can run a bit later.
-            if (updateCounters) updateSwipeCounter(messageId, { message, messageElement: $(div) });
-        } else {
-            //Hide all messages that are not swipeable.
-            div.classList.remove('swipes_visible', 'last_swipe');
-            $(div).find('.mes_swipe_picker').toggle(canOpenSwipePickerForMessage(messageId));
-        }
+        refreshSwipeButtonElement(div, messageId, { updateCounters, fade });
     });
 }
 /**
@@ -10978,6 +11300,8 @@ export async function swipe(event, direction, { source, repeated, message = chat
     const thisMesTextHeight = thisMesText[0]?.scrollHeight;
     if (![thisMesDiv.length, thisMesText.length].every(num => num > 0)) {
         console.error(`Message #${mesId}'s DOM element is not valid.`);
+        // Without this the state machine stays in SWIPING and every later send is refused.
+        swipeState = SWIPE_STATE.NONE;
         return;
     }
     const originalSwipeId = Number(chat[mesId]?.swipe_id ?? 0);
@@ -11011,9 +11335,26 @@ export async function swipe(event, direction, { source, repeated, message = chat
 
     /**
      * Waits for the generation to end, reverts the swipe if swipe_id has not changed.
+     * The swipe state is always reset, even when the generation or a DOM update throws.
      * @param {boolean} revert Attept to revert the swipe without saving.
      */
     async function endSwipe(revert = false) {
+        try {
+            await endSwipeInternal(revert);
+        } finally {
+            //Allow for another swipe.
+            swipeState = SWIPE_STATE.NONE;
+            delete document.body.dataset.swiping;
+            showSwipeButtons();
+            syncSendButtons();
+        }
+    }
+
+    /**
+     * Body of {@link endSwipe}, always executed through it so the swipe state is reset.
+     * @param {boolean} revert Attept to revert the swipe without saving.
+     */
+    async function endSwipeInternal(revert = false) {
         //Wait for the generation to end.
         try {
             //`mes_buttons` need to be hidden until the animation completes.
@@ -11071,11 +11412,6 @@ export async function swipe(event, direction, { source, repeated, message = chat
             //Save the chat if swipe_id has changed.
             saveChatDebounced();
         }
-
-        //Allow for another swipe.
-        swipeState = SWIPE_STATE.NONE;
-        delete document.body.dataset.swiping;
-        showSwipeButtons();
     }
 
     async function standardSwipe(newSwipeId) {
@@ -11308,6 +11644,7 @@ export async function swipe(event, direction, { source, repeated, message = chat
     }
 
     if (isHordeGenerationNotAllowed()) {
+        resetSwipeState();
         return unblockGeneration();
     }
 
@@ -12209,7 +12546,9 @@ jQuery(async function () {
 
     const userInputGenerateMutex = new SimpleMutex(sendTextareaMessage);
     $('#send_but').on('click', async function () {
-        await userInputGenerateMutex.update();
+        // sendTextareaMessage() rethrows for callers that await it; here it would only surface as an
+        // unhandled rejection in the console, since the failure is already logged and toasted.
+        await userInputGenerateMutex.update().catch(error => console.error('Send button handler failed', error));
     });
 
     //menu buttons setup

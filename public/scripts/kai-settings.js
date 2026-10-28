@@ -210,19 +210,23 @@ export function getKoboldGenerationData(finalPrompt, settings, maxLength, maxCon
 }
 
 function tryParseStreamingError(response, decoded) {
+    let data;
+
     try {
-        const data = JSON.parse(decoded);
-
-        if (!data) {
-            return;
-        }
-
-        if (data.error) {
-            toastr.error(data.error.message || response.statusText, 'KoboldAI API');
-            throw new Error(data);
-        }
+        data = JSON.parse(decoded);
     } catch {
         // No JSON. Do nothing.
+        return;
+    }
+
+    if (!data) {
+        return;
+    }
+
+    if (data.error) {
+        const message = data.error.message || response.statusText;
+        toastr.error(message, 'KoboldAI API');
+        throw new Error(message);
     }
 }
 

@@ -722,19 +722,23 @@ export function adjustNovelInstructionPrompt(prompt) {
 }
 
 function tryParseStreamingError(response, decoded) {
+    let data;
+
     try {
-        const data = JSON.parse(decoded);
-
-        if (!data) {
-            return;
-        }
-
-        if (data.message || data.error) {
-            toastr.error(data.message || data.error?.message || response.statusText, 'NovelAI API');
-            throw new Error(data);
-        }
+        data = JSON.parse(decoded);
     } catch {
         // No JSON. Do nothing.
+        return;
+    }
+
+    if (!data) {
+        return;
+    }
+
+    if (data.message || data.error) {
+        const message = data.message || data.error?.message || response.statusText;
+        toastr.error(message, 'NovelAI API');
+        throw new Error(message);
     }
 }
 

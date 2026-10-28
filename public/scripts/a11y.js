@@ -104,12 +104,19 @@ function applyMatchingRules(element) {
  * @param {Element} element Element to process.
  */
 function applyA11yRules(element) {
+    // <option>/<optgroup> match no rule and never contain a rule target. Large
+    // model lists add tens of thousands of them on startup.
+    if (element instanceof HTMLOptionElement || element instanceof HTMLOptGroupElement) {
+        return;
+    }
     try {
         // Single combined query, then dispatch rules only on actual matches
         if (element.matches(combinedA11ySelector)) {
             applyMatchingRules(element);
         }
-        element.querySelectorAll(combinedA11ySelector).forEach(applyMatchingRules);
+        if (element.firstElementChild) {
+            element.querySelectorAll(combinedA11ySelector).forEach(applyMatchingRules);
+        }
     } catch (error) {
         console.error('Error applying accessibility rules to element:', element, error);
     }

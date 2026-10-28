@@ -17,7 +17,6 @@ import {
     removeOldBackups,
     formatBytes,
     tryWriteFileSync,
-    tryReadFileSync,
     tryDeleteFile,
     readFirstLine,
     isPathUnderParent,
@@ -58,14 +57,21 @@ function backupChat(directory, name, data, backupPrefix = CHAT_BACKUPS_PREFIX) {
             name = 'Unnamed';
         }
 
-        const backupFile = path.join(directory, `${backupPrefix}${name}_${generateTimestamp()}.jsonl`);
+        const backupDirectory = path.resolve(directory);
+        const backupFileName = `${backupPrefix}${name}_${generateTimestamp()}.jsonl`;
+        const backupFile = path.resolve(backupDirectory, backupFileName);
+        // The name is sanitized above; keep the resolved path inside the backup
+        // directory as a second line of defense against separators or dot segments.
+        if (!isPathUnderParent(backupDirectory, backupFile)) {
+            throw new Error(`Refusing to write a chat backup outside "${backupDirectory}".`);
+        }
 
         tryWriteFileSync(backupFile, data);
-        removeOldBackups(directory, `${backupPrefix}${name}_`);
+        removeOldBackups(backupDirectory, `${backupPrefix}${name}_`);
         if (isNaN(maxTotalChatBackups) || maxTotalChatBackups < 0) {
             return;
         }
-        removeOldBackups(directory, backupPrefix, maxTotalChatBackups);
+        removeOldBackups(backupDirectory, backupPrefix, maxTotalChatBackups);
     } catch (err) {
         console.error(`Could not backup chat for ${name}`, err);
     }
@@ -541,19 +547,24 @@ export async function trySaveChat(chatData, filePath, skipIntegrityCheck = false
     const doIntegrityCheck = (checkIntegrity && !skipIntegrityCheck);
     const chatIntegritySlug = doIntegrityCheck ? chatData?.[0]?.chat_metadata?.integrity : undefined;
 
-    if (chatIntegritySlug && !await checkChatIntegrity(filePath, chatIntegritySlug)) {
-        throw new IntegrityMismatchError(`Chat integrity check failed for "${filePath}". The expected integrity slug was "${chatIntegritySlug}".`);
-    }
-
     // Multi-window lost-update check (no-op when the flag is off or the save is forced).
     // A brand-new chat file doesn't exist yet — treat that as "no first line"
-    // (same leniency as checkChatIntegrity above) instead of letting the
+    // (same leniency as checkChatIntegrity below) instead of letting the
     // read reject with ENOENT and 500 the first save of every new chat.
+    // This runs before the integrity check: a stale revision is the more common
+    // failure when multi-window mode is enabled, and should not be masked by it.
     const onDiskFirstLine = fs.existsSync(filePath) ? await readFirstLine(filePath) : null;
     const isForced = !!skipIntegrityCheck;
     const revCheck = checkChatRevision(onDiskFirstLine, clientRev, isForced, isMultiWindowEnabled());
     if (revCheck.conflict) {
         throw new ChatConflictError(`Chat revision conflict for "${filePath}". Client rev was "${clientRev}", server rev is "${revCheck.serverRev}".`);
+    }
+
+    // The integrity check must run even when the incoming header has no slug.
+    // Otherwise a failed load that resets chat_metadata to {} can overwrite a
+    // protected file. checkChatIntegrity still accepts new and legacy files.
+    if (doIntegrityCheck && !await checkChatIntegrity(filePath, chatIntegritySlug)) {
+        throw new IntegrityMismatchError(`Chat integrity check failed for "${filePath}". The incoming integrity slug was "${chatIntegritySlug ?? 'missing'}".`);
     }
 
     // Stamp the next revision into the chat header before serialising.
@@ -603,32 +614,87 @@ router.post('/save', validateAvatarUrlMiddleware, async function (request, respo
 });
 
 /**
- * Gets the chat as an object.
+ * Gets the chat as an array of JSONL records.
+ * Missing and empty files return an empty array. Read errors and malformed
+ * non-empty lines throw so callers do not mistake a broken file for an empty chat.
  * @param {string} chatFilePath The full chat file path.
- * @returns {Array}} If the chatFilePath cannot be read, this will return [].
+ * @param {string} [allowedRoot] When set, the file must resolve inside this directory.
+ * @returns {Array} Parsed chat records.
+ * @throws {Error} If the file cannot be read or a non-empty line cannot be parsed.
  */
-export function getChatData(chatFilePath) {
-    let chatData = [];
-
-    const chatJSON = tryReadFileSync(chatFilePath) ?? '';
-    if (chatJSON.length > 0) {
-        const lines = chatJSON.split('\n');
-        // Iterate through the array of strings and parse each line as JSON
-        chatData = lines.map(line => tryParse(line)).filter(x => x);
-    } else {
-        console.warn(`File not found: ${chatFilePath}. The chat does not exist or is empty.`);
+export function getChatData(chatFilePath, allowedRoot = undefined) {
+    if (allowedRoot && !isPathUnderParent(path.resolve(allowedRoot), path.resolve(chatFilePath))) {
+        throw new Error('Refusing to read a chat outside the allowed directory.');
     }
 
-    return chatData;
+    let chatJSON;
+    try {
+        chatJSON = fs.readFileSync(chatFilePath, 'utf8');
+    } catch (error) {
+        if (error?.code === 'ENOENT') {
+            return [];
+        }
+        throw new Error('Could not read the chat file.', { cause: error });
+    }
+
+    if (!chatJSON.trim()) {
+        return [];
+    }
+
+    const lines = chatJSON.split('\n');
+    const parsedLines = [];
+    const malformedIndices = [];
+    const malformedLineNumbers = [];
+    for (let index = 0; index < lines.length; index++) {
+        // Strip a UTF-8 BOM that an external editor may have added to the header.
+        const line = index === 0 ? lines[index].replace(/^\uFEFF/, '') : lines[index];
+        if (!line.trim()) {
+            continue;
+        }
+        const parsed = tryParse(line);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            malformedIndices.push(parsedLines.length);
+            parsedLines.push(null);
+            malformedLineNumbers.push(index + 1);
+        } else {
+            parsedLines.push(parsed);
+        }
+    }
+
+    if (malformedIndices.length === 0) {
+        return parsedLines;
+    }
+
+    // A truncated write typically leaves only the last record broken. Keep the
+    // readable prefix so the chat still opens with a degraded preview (1.19.0
+    // behavior), but never hide damage in the middle of a chat file.
+    const lastValidIndex = parsedLines.findLastIndex(line => line !== null);
+    const firstLineIsValid = parsedLines.length > 0 && parsedLines[0] !== null;
+    const onlyTrailingDamage = malformedIndices.every(index => index > lastValidIndex);
+
+    if (firstLineIsValid && lastValidIndex >= 0 && onlyTrailingDamage) {
+        console.warn(`Dropping ${malformedIndices.length} unparseable trailing line(s) from chat file.`);
+        return parsedLines.filter(line => line !== null);
+    }
+
+    throw new SyntaxError(`Could not parse the chat file at line ${malformedLineNumbers[0]}.`);
 }
 
 router.post('/get', validateAvatarUrlMiddleware, function (request, response) {
+    // Core sends this header and requires an array. Older third-party callers
+    // keep the historical 200 + {} response on missing/error paths.
+    const requireArray = request.get('X-Require-Chat-Array') === '1';
     try {
         const dirName = String(request.body.avatar_url).replace('.png', '');
         const directoryPath = path.join(request.user.directories.chats, dirName);
         if (!isPathUnderParent(request.user.directories.chats, directoryPath)) {
             return response.sendStatus(400);
         }
+
+        if (!request.body.file_name) {
+            return requireArray ? response.sendStatus(400) : response.json({});
+        }
+
         const chatDirExists = fs.existsSync(directoryPath);
 
         //if no chat dir for the character is found, make one with the character name
@@ -636,20 +702,16 @@ router.post('/get', validateAvatarUrlMiddleware, function (request, response) {
             // recursive: character avatars may live in subdirectories (subfolder-as-character-card),
             // so dirName can contain path separators (e.g. "folder/char"), requiring intermediate dirs.
             fs.mkdirSync(directoryPath, { recursive: true });
-            return response.send({});
-        }
-
-        if (!request.body.file_name) {
-            return response.send({});
+            return requireArray ? response.json([]) : response.json({});
         }
 
         const chatFileName = `${String(request.body.file_name)}.jsonl`;
         const chatFilePath = path.join(directoryPath, sanitize(chatFileName));
 
-        return response.send(getChatData(chatFilePath));
+        return response.json(getChatData(chatFilePath, directoryPath));
     } catch (error) {
         console.error(error);
-        return response.send({});
+        return requireArray ? response.sendStatus(500) : response.json({});
     }
 });
 
@@ -905,14 +967,19 @@ router.post('/import', validateAvatarUrlMiddleware, function (request, response)
 });
 
 router.post('/group/get', (request, response) => {
-    if (!request.body || !request.body.id) {
-        return response.sendStatus(400);
+    try {
+        if (!request.body || !request.body.id) {
+            return response.sendStatus(400);
+        }
+
+        const id = request.body.id;
+        const chatFilePath = path.join(request.user.directories.groupChats, sanitize(`${id}.jsonl`));
+
+        return response.json(getChatData(chatFilePath, request.user.directories.groupChats));
+    } catch (error) {
+        console.error(error);
+        return response.sendStatus(500);
     }
-
-    const id = request.body.id;
-    const chatFilePath = path.join(request.user.directories.groupChats, sanitize(`${id}.jsonl`));
-
-    return response.send(getChatData(chatFilePath));
 });
 
 router.post('/group/info', async (request, response) => {

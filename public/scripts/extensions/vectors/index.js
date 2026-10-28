@@ -61,6 +61,7 @@ const settings = {
     alt_endpoint_url: '',
     use_alt_endpoint: false,
     include_wi: false,
+    query_length_limit: true,
     togetherai_model: 'togethercomputer/m2-bert-80M-32k-retrieval',
     openai_model: 'text-embedding-ada-002',
     electronhub_model: 'text-embedding-3-small',
@@ -919,8 +920,21 @@ async function getQueryText(chat, initiator) {
     }
 
     const queryText = hashedMessages.map(x => x.text).join('\n');
+    const normalizedQuery = collapseNewlines(queryText).trim();
 
-    return collapseNewlines(queryText).trim();
+    // The query is embedded in one piece. A long Continue message can grow it to
+    // several thousand tokens, which makes local ONNX embedding models abort
+    // with std::bad_alloc and leaves the vector index unusable. Keep the most
+    // recent tail, which is also the most relevant part of the query.
+    // With the limit toggle off, still cap at 8000 characters instead of
+    // sending an unbounded query.
+    const maxQueryChars = settings.query_length_limit === false ? 8000 : 4000;
+    if (settings.query_length_limit !== false && normalizedQuery.length > maxQueryChars) {
+        console.warn(`Vectors: query text truncated from ${normalizedQuery.length} to ${maxQueryChars} characters.`);
+        return normalizedQuery.slice(-maxQueryChars);
+    }
+
+    return normalizedQuery;
 }
 
 /**
@@ -1749,6 +1763,11 @@ export async function init() {
     });
     $('#vectors_keep_hidden').prop('checked', settings.keep_hidden).on('input', () => {
         settings.keep_hidden = !!$('#vectors_keep_hidden').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_query_length_limit').prop('checked', settings.query_length_limit !== false).on('input', () => {
+        settings.query_length_limit = !!$('#vectors_query_length_limit').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });

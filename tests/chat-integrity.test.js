@@ -160,9 +160,26 @@ describe('trySaveChat integrity check', () => {
         expect(fs.readFileSync(chatFile, 'utf8')).toBe(toJsonl(newChat));
     });
 
-    test('skips the check when the incoming chat has no integrity slug (existing behavior)', async () => {
-        fs.writeFileSync(chatFile, toJsonl(makeChat(SLUG)));
+    test('refuses to overwrite a protected chat when the incoming header lost its integrity slug', async () => {
+        const originalBytes = toJsonl(makeChat(SLUG));
+        fs.writeFileSync(chatFile, originalBytes);
+        // A header-only payload without integrity metadata is what a failed load
+        // leaves behind when chat_metadata has been reset to {}.
+        await expect(save(makeChat(null).slice(0, 1))).rejects.toThrow(/integrity check failed/i);
+        expect(fs.readFileSync(chatFile, 'utf8')).toBe(originalBytes);
+    });
+
+    test('still writes a new chat that has no integrity slug', async () => {
         const newChat = makeChat(null);
+        await save(newChat);
+        expect(fs.readFileSync(chatFile, 'utf8')).toBe(toJsonl(newChat));
+    });
+
+    test('still updates a legacy chat that has no integrity slug on disk', async () => {
+        const legacyHeader = JSON.stringify({ user_name: 'User', character_name: 'Char', create_date: '2023-01-01' });
+        fs.writeFileSync(chatFile, legacyHeader + '\n' + JSON.stringify({ name: 'Char', mes: 'Old' }));
+        const newChat = makeChat(null);
+        newChat[1].mes = 'Updated';
         await save(newChat);
         expect(fs.readFileSync(chatFile, 'utf8')).toBe(toJsonl(newChat));
     });

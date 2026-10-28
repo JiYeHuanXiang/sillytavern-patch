@@ -1310,6 +1310,11 @@ router.post('/edit', validateAvatarUrlMiddleware, async function (request, respo
     try {
         if (!request.file) {
             const avatarPath = path.join(request.user.directories.characters, request.body.avatar_url);
+            // Editing must not resurrect a card whose avatar was deleted. The
+            // fallback image in writeCharacterData is for imports, not edits.
+            if (!fs.existsSync(avatarPath)) {
+                return response.sendStatus(404);
+            }
             await writeCharacterData(avatarPath, char, targetFile, request);
         } else {
             const crop = tryParse(request.query.crop);

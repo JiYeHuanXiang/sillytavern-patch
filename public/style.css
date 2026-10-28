@@ -147,6 +147,14 @@ html {
     -webkit-perspective: 1000;
 }
 
+/* Firefox 157+ stops compositing backdrop-filter correctly once <html> is
+   promoted to its own layer. Keep the Chromium flicker fix, opt Firefox out. */
+@supports (-moz-appearance: none) {
+    html {
+        -webkit-transform: none;
+    }
+}
+
 body {
     margin: 0;
     padding: 0;

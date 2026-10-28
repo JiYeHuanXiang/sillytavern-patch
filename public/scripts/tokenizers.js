@@ -612,7 +612,7 @@ export function getTokenizerModel() {
             return mistralTokenizer;
         } else if (model?.architecture?.tokenizer === 'Yi') {
             return yiTokenizer;
-        } else if (model?.architecture?.tokenizer === 'Gemini') {
+        } else if (model?.architecture?.tokenizer === 'Gemini' || model?.architecture?.tokenizer === 'Gemma') {
             return gemmaTokenizer;
         } else if (model?.architecture?.tokenizer === 'Qwen') {
             return qwen2Tokenizer;
@@ -639,7 +639,7 @@ export function getTokenizerModel() {
     }
 
     if (oai_settings.chat_completion_source == chat_completion_sources.ELECTRONHUB && oai_settings.electronhub_model) {
-        if (oai_settings.electronhub_model.includes('gpt-4o') || oai_settings.electronhub_model.includes('gpt-5') || oai_settings.electronhub_model.includes('gpt-6-astra')) {
+        if (oai_settings.electronhub_model.includes('gpt-4o') || oai_settings.electronhub_model.includes('gpt-5') || oai_settings.electronhub_model.includes('gpt-6-')) {
             return gpt4oTokenizer;
         } else if (oai_settings.electronhub_model.includes('gpt-4.1') || oai_settings.electronhub_model.includes('gpt-4.5')) {
             return gpt4oTokenizer;
@@ -867,17 +867,27 @@ export async function countTokensOpenAIAsync(messages, full = false) {
         if (typeof cachedCount === 'number') {
             token_count += cachedCount;
         } else {
-            const data = await jQuery.ajax({
-                async: true,
-                type: 'POST', //
-                url: tokenizerEndpoint,
-                data: JSON.stringify([message]),
-                dataType: 'json',
-                contentType: 'application/json',
-            });
+            try {
+                const data = await jQuery.ajax({
+                    async: true,
+                    type: 'POST', //
+                    url: tokenizerEndpoint,
+                    data: JSON.stringify([message]),
+                    dataType: 'json',
+                    contentType: 'application/json',
+                    timeout: 20000,
+                });
 
-            token_count += Number(data.token_count);
-            cacheObject[cacheKey] = Number(data.token_count);
+                token_count += Number(data.token_count);
+                cacheObject[cacheKey] = Number(data.token_count);
+            } catch (error) {
+                // A failed count request must not abort prompt assembly (and with it the whole
+                // generation). Fall back to an estimate, like the other tokenizer backends do.
+                console.warn('Failed to count tokens for a message, using an estimate', error);
+                const fallback = guesstimate(JSON.stringify(message));
+                token_count += fallback;
+                cacheObject[cacheKey] = fallback;
+            }
         }
     }
 
@@ -928,6 +938,7 @@ function countTokensFromServer(endpoint, str, resolve) {
         data: JSON.stringify({ text: str }),
         dataType: 'json',
         contentType: 'application/json',
+        timeout: 20000,
         success: function (data) {
             if (typeof data.count === 'number') {
                 tokenCount = data.count;
@@ -936,6 +947,11 @@ function countTokensFromServer(endpoint, str, resolve) {
             }
 
             isAsync && resolve(tokenCount);
+        },
+        error: function () {
+            // Never leave the promise pending: a failed tokenizer request would block prompt
+            // assembly (and the whole generation) forever, especially on flaky mobile networks.
+            isAsync && resolve(apiFailureTokenCount(str));
         },
     });
 
@@ -962,6 +978,7 @@ function countTokensFromKoboldAPI(str, resolve) {
         }),
         dataType: 'json',
         contentType: 'application/json',
+        timeout: 20000,
         success: function (data) {
             if (typeof data.count === 'number') {
                 tokenCount = data.count;
@@ -970,6 +987,9 @@ function countTokensFromKoboldAPI(str, resolve) {
             }
 
             isAsync && resolve(tokenCount);
+        },
+        error: function () {
+            isAsync && resolve(apiFailureTokenCount(str));
         },
     });
 
@@ -1002,6 +1022,7 @@ function countTokensFromTextgenAPI(str, resolve) {
         data: JSON.stringify(getTextgenAPITokenizationParams(str)),
         dataType: 'json',
         contentType: 'application/json',
+        timeout: 20000,
         success: function (data) {
             if (typeof data.count === 'number') {
                 tokenCount = data.count;
@@ -1010,6 +1031,9 @@ function countTokensFromTextgenAPI(str, resolve) {
             }
 
             isAsync && resolve(tokenCount);
+        },
+        error: function () {
+            isAsync && resolve(apiFailureTokenCount(str));
         },
     });
 
@@ -1064,6 +1088,9 @@ function getTextTokensFromServer(endpoint, str, resolve) {
 
             isAsync && resolve(ids);
         },
+        error: function () {
+            isAsync && resolve(ids);
+        },
     });
     return ids;
 }
@@ -1086,6 +1113,9 @@ function getTextTokensFromTextgenAPI(str, resolve) {
         contentType: 'application/json',
         success: function (data) {
             ids = data.ids;
+            isAsync && resolve(ids);
+        },
+        error: function () {
             isAsync && resolve(ids);
         },
     });
@@ -1116,6 +1146,9 @@ function getTextTokensFromKoboldAPI(str, resolve) {
             ids = data.ids;
             isAsync && resolve(ids);
         },
+        error: function () {
+            isAsync && resolve(ids);
+        },
     });
 
     return ids;
@@ -1142,6 +1175,9 @@ function decodeTextTokensFromServer(endpoint, ids, resolve) {
         success: function (data) {
             text = data.text;
             chunks = data.chunks;
+            isAsync && resolve({ text, chunks });
+        },
+        error: function () {
             isAsync && resolve({ text, chunks });
         },
     });

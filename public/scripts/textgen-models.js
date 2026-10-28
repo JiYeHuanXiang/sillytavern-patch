@@ -1416,6 +1416,7 @@ export function getCurrentOpenRouterModelTokenizer() {
         case 'Mistral':
             return tokenizers.MISTRAL;
         case 'Gemini':
+        case 'Gemma':
             return tokenizers.GEMMA;
         case 'Claude':
             return tokenizers.CLAUDE;

@@ -159,7 +159,11 @@ export function sendSystemMessage(type, text, extra = {}) {
     const newMessage = getSystemMessageByType(type, text, extra);
     chat.push(newMessage);
     addOneMessage(newMessage);
-    setSendButtonState(false);
+    // Inserting a system message mid-generation must not release the send lock, otherwise a
+    // second generation can start while the first one is still streaming.
+    if (!document.body.dataset.generating) {
+        setSendButtonState(false);
+    }
     if (type === system_message_types.SLASH_COMMANDS) {
         const browser = new SlashCommandBrowser();
         const spinner = document.querySelector('#chat .last_mes .custom-slashHelp');

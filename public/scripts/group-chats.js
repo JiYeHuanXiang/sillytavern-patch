@@ -69,6 +69,8 @@ import {
     setCharacterSettingsOverrides,
     system_avatar,
     isChatSaving,
+    isChatLoading,
+    setChatLoading,
     setExternalAbortController,
     baseChatReplace,
     createLazyFields,
@@ -211,19 +213,20 @@ async function regenerateGroup() {
 async function loadGroupChat(chatId) {
     const response = await fetch('/api/chats/group/get', {
         method: 'POST',
-        headers: getRequestHeaders(),
+        headers: { ...getRequestHeaders(), 'X-Require-Chat-Array': '1' },
         body: JSON.stringify({ id: chatId }),
     });
 
-    if (response.ok) {
-        const data = await response.json();
-        if (!Array.isArray(data)) {
-            return [];
-        }
-        return data;
+    if (!response.ok) {
+        throw new Error(`Group chat request failed with status ${response.status}`);
     }
 
-    return [];
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+        throw new Error('Group chat response was not an array');
+    }
+
+    return data;
 }
 
 /**
@@ -280,13 +283,13 @@ async function validateGroup(group) {
  * Loads the chat messages for a specific group.
  * @param {string} groupId - The ID of the group to load chat messages for.
  * @param {boolean} reload - Whether to reload the group chat after loading.
- * @returns {Promise<void>} A promise that resolves when the chat messages have been loaded.
+ * @returns {Promise<boolean>} Whether the group chat was loaded.
  */
 export async function getGroupChat(groupId, reload = false) {
     const group = groups.find((x) => x.id === groupId);
     if (!group) {
         console.warn('Group not found', groupId);
-        return;
+        return false;
     }
 
     // Multichat: ensure new fields exist on legacy group objects
@@ -304,8 +307,18 @@ export async function getGroupChat(groupId, reload = false) {
     await validateGroup(group);
     await unshallowGroupMembers(groupId);
 
+    setChatLoading(true);
+
     const chat_id = group.chat_id;
-    const data = await loadGroupChat(chat_id);
+    let data;
+    try {
+        data = await loadGroupChat(chat_id);
+    } catch (error) {
+        console.error('Failed to load group chat', error);
+        toastr.error(t`The group chat file could not be loaded. Reload the page before continuing.`, t`Group chat could not be loaded`);
+        return false;
+    }
+
     const metadata = data?.[0]?.chat_metadata ?? {};
     const freshChat = !metadata.tainted && (!Array.isArray(data) || !data.length);
 
@@ -319,6 +332,7 @@ export async function getGroupChat(groupId, reload = false) {
         metadata.integrity = uuidv4();
     }
 
+    setChatLoading(false);
     await loadItemizedPrompts(getCurrentChatId());
 
     if (group && Array.isArray(group.members) && freshChat) {
@@ -365,6 +379,7 @@ export async function getGroupChat(groupId, reload = false) {
 
     await eventSource.emit(event_types.CHAT_CHANGED, getCurrentChatId());
     if (freshChat) await eventSource.emit(event_types.GROUP_CHAT_CREATED);
+    return true;
 }
 
 /**
@@ -682,6 +697,10 @@ async function saveGroupChat(groupId, shouldSaveGroup, force = false) {
         console.warn('Group not found', groupId);
         return;
     }
+    if (isChatLoading) {
+        console.warn('saveGroupChat skipped: the group chat is still loading');
+        return;
+    }
     const chatId = group.chat_id;
     group.date_last_chat = Date.now();
     /** @type {ChatHeader} */
@@ -690,6 +709,7 @@ async function saveGroupChat(groupId, shouldSaveGroup, force = false) {
         user_name: 'unused',
         character_name: 'unused',
     };
+
     const saveGroupChatRequest = await compressRequest({
         method: 'POST',
         headers: getRequestHeaders(),
@@ -743,7 +763,13 @@ async function saveGroupChat(groupId, shouldSaveGroup, force = false) {
     }
 
     if (shouldSaveGroup) {
-        await editGroup(groupId, false, false);
+        try {
+            await editGroup(groupId, false, false);
+        } catch (error) {
+            // The chat file itself was saved; report the group metadata failure separately.
+            console.error('Group info could not be saved', error);
+            toastr.error(t`The chat was saved, but the group settings could not be saved.`, t`Group info could not be saved`);
+        }
     }
 }
 
@@ -2249,8 +2275,7 @@ export async function openGroupById(groupId) {
             selected_group = groupId;
             setEditedMessageId(undefined);
             updateChatMetadata({}, true);
-            await getGroupChat(groupId);
-            return true;
+            return await getGroupChat(groupId);
         }
     }
 

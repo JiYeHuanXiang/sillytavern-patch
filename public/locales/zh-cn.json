@@ -2473,6 +2473,7 @@
     "Purge Vectors": "清除向量",
     "Chat vectorization settings": "聊天向量化设置",
     "Enabled for chat messages": "已启用聊天消息",
+    "Limit vector query length": "限制向量查询长度",
     "Retain#": "保持＃",
     "Insert#": "插入＃",
     "Vector Summarization": "向量摘要",
@@ -3723,5 +3724,13 @@
     "tokens": "tokens",
     "Cache break at message #": "缓存断点位于消息 #",
     "Cache hit": "缓存命中",
-    "(source: ": "(来源: "
+    "(source: ": "(来源: ",
+    "The API did not start responding in time.": "API 未在超时时间内开始响应。",
+    "Request timed out": "请求超时",
+    "The API stopped sending data. Generation was stopped and the partial reply was kept.": "API 已停止发送数据。生成已终止，已生成的部分内容已保留。",
+    "Generation timed out": "生成超时",
+    "The request did not stop in time and was force-closed.": "请求未能及时停止，已被强制结束。",
+    "Generation stopped": "生成已停止",
+    "Failed to send message": "发送消息失败",
+    "Unknown error": "未知错误"
 }

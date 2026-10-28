@@ -163,4 +163,24 @@ describe('forwardFetchResponse', () => {
         expect(response.statusCode).toBe(502);
         expect(warnSpy).toHaveBeenCalledWith(`Streaming request failed with status 502 Bad Gateway: ${body}`);
     });
+
+    test('should end the downstream response when the upstream body errors mid-stream', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const upstream = new PassThrough();
+        const response = createMockExpressResponse();
+        // Only used for its 'close' event by forwardFetchResponse.
+        response.socket = new PassThrough();
+        const finished = once(response, 'finish');
+
+        const forwarding = forwardFetchResponse(new Response(upstream, { status: 200 }), response);
+
+        upstream.write('data: partial\n\n');
+        upstream.destroy(new Error('upstream connection reset'));
+
+        // Without an error handler the piped response is never ended and this would hang.
+        await finished;
+        await forwarding;
+
+        expect(errorSpy).toHaveBeenCalledWith('Streaming request failed mid-stream', expect.any(Error));
+    });
 });

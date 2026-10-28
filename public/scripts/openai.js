@@ -1703,6 +1703,15 @@ function getChatCompletionErrorMessage(data, response) {
 }
 
 /**
+ * Creates an error that was already reported to the user, so callers do not report it twice.
+ * @param {string} message Error message
+ * @returns {Error} Error flagged as reported
+ */
+function createReportedApiError(message) {
+    return Object.assign(new Error(message), { isApiError: true });
+}
+
+/**
  * Handles errors during streaming requests.
  * @param {Response} response
  * @param {string} decoded - response text or decoded stream data
@@ -1710,35 +1719,39 @@ function getChatCompletionErrorMessage(data, response) {
  * @param {boolean?} [options.quiet=false] Suppress toast messages
  */
 export function tryParseStreamingError(response, decoded, { quiet = false } = {}) {
+    let data;
+
     try {
-        const data = JSON.parse(decoded);
-
-        if (!data) {
-            return;
-        }
-
-        checkQuotaError(data, { quiet });
-        checkModerationError(data, { quiet });
-
-        // these do not throw correctly (equiv to Error("[object Object]"))
-        // if trying to fix "[object Object]" displayed to users, start here
-
-        if (data.error) {
-            !quiet && toastr.error(getChatCompletionErrorMessage(data, response), 'Chat Completion API');
-            throw new Error(data);
-        }
-
-        if (data.message) {
-            !quiet && toastr.error(data.message, 'Chat Completion API');
-            throw new Error(data);
-        }
-
-        if (data.detail) {
-            !quiet && toastr.error(getChatCompletionErrorMessage(data, response), 'Chat Completion API');
-            throw new Error(data);
-        }
+        data = JSON.parse(decoded);
     } catch {
         // No JSON. Do nothing.
+        return;
+    }
+
+    if (!data) {
+        return;
+    }
+
+    checkQuotaError(data, { quiet });
+    checkModerationError(data, { quiet });
+
+    // These must throw out of this function: an error frame inside a live stream has to terminate
+    // the stream instead of being forwarded as a regular chunk.
+    if (data.error) {
+        const message = getChatCompletionErrorMessage(data, response);
+        !quiet && toastr.error(message, 'Chat Completion API');
+        throw quiet ? new Error(message) : createReportedApiError(message);
+    }
+
+    if (data.message) {
+        !quiet && toastr.error(data.message, 'Chat Completion API');
+        throw quiet ? new Error(String(data.message)) : createReportedApiError(String(data.message));
+    }
+
+    if (data.detail) {
+        const message = getChatCompletionErrorMessage(data, response);
+        !quiet && toastr.error(message, 'Chat Completion API');
+        throw quiet ? new Error(message) : createReportedApiError(message);
     }
 }
 
@@ -2800,7 +2813,7 @@ function getReasoningEffort(settings = null, model = null) {
                 return reasoning_effort_types.low;
             case reasoning_effort_types.max:
                 if ([chat_completion_sources.OPENAI, chat_completion_sources.AZURE_OPENAI].includes(settings.chat_completion_source)
-                    && /^gpt-6-astra/.test(model)) {
+                    && /^gpt-6-/.test(model)) {
                     return reasoning_effort_types.max;
                 }
                 if ([chat_completion_sources.OPENAI, chat_completion_sources.AZURE_OPENAI].includes(settings.chat_completion_source)
@@ -3320,7 +3333,7 @@ export async function createGenerationParameters(settings, model, type, messages
         }
     }
 
-    if (gptSources.includes(settings.chat_completion_source) && /gpt-6-astra/.test(model)) {
+    if (gptSources.includes(settings.chat_completion_source) && /gpt-6-/.test(model)) {
         generate_data.max_completion_tokens = generate_data.max_tokens;
         delete generate_data.max_tokens;
         delete generate_data.temperature;
@@ -3412,6 +3425,7 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
         return async function* streamData() {
             let text = '';
             const swipes = [];
+            const swipeStates = [];
             const toolCalls = [];
             const state = { reasoning: '', images: [], signature: '', toolSignatures: {} };
             while (true) {
@@ -3442,17 +3456,25 @@ async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } =
                     updateDeepSeekCacheDiagnosticsUI();
                 }
 
-                if (canMultiSwipe && Array.isArray(parsed?.choices) && parsed?.choices?.[0]?.index > 0) {
-                    const swipeIndex = parsed.choices[0].index - 1;
-                    // FIXME: state.reasoning should be an array to support multi-swipe
-                    swipes[swipeIndex] = (swipes[swipeIndex] || '') + getStreamingReply(parsed, state, { chatCompletionSource: streamingSource, overrideShowThoughts: false });
+                if (canMultiSwipe && Array.isArray(parsed?.choices)) {
+                    for (const choice of parsed.choices) {
+                        const choiceData = { ...parsed, choices: [choice] };
+                        if (choice.index > 0) {
+                            const swipeIndex = choice.index - 1;
+                            swipeStates[swipeIndex] ??= { reasoning: '', images: [], signature: '', toolSignatures: {} };
+                            swipes[swipeIndex] = (swipes[swipeIndex] || '') +
+                                getStreamingReply(choiceData, swipeStates[swipeIndex], { chatCompletionSource: streamingSource });
+                        } else if (choice.index === 0 || choice.index === undefined) {
+                            text += getStreamingReply(choiceData, state, { chatCompletionSource: streamingSource });
+                        }
+                    }
                 } else {
                     text += getStreamingReply(parsed, state, { chatCompletionSource: streamingSource });
                 }
 
                 ToolManager.parseToolCalls(toolCalls, parsed, state.toolSignatures);
 
-                yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed), toolCalls: toolCalls, state: state, cacheUsage: cacheUsage };
+                yield { text, swipes: swipes, swipeStates: swipeStates, logprobs: parseChatCompletionLogprobs(parsed), toolCalls: toolCalls, state: state, cacheUsage: cacheUsage };
             }
         };
     } else {
@@ -5450,7 +5472,7 @@ function getMaxContextOpenAI(value) {
 
     /** @type {[RegExp, number][]} */
     const contextMap = [
-        [/^gpt-6-astra/, max_1050k],
+        [/^gpt-6-/, max_1050k],
         [/^gpt-5\.6/, max_1050k],
         [/^gpt-5\.[45]/, max_1mil],
         [/^gpt-5/, max_400k],
@@ -6663,6 +6685,8 @@ export function isImageInliningSupported() {
         'gpt-4.5-preview',
         'gpt-4o',
         'gpt-6-astra',
+        'gpt-6-sol',
+        'gpt-6-luna',
         'gpt-5',
         'o1',
         'o3',

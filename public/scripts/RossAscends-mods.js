@@ -20,6 +20,7 @@ import {
     sendTextareaMessage,
     doNavbarIconClick,
     isSwipingAllowed,
+    syncSendButtons,
 } from '../script.js';
 
 import {
@@ -27,7 +28,7 @@ import {
     send_on_enter_options,
 } from './power-user.js';
 
-import { selected_group, is_group_generating, openGroupById } from './group-chats.js';
+import { openGroupById } from './group-chats.js';
 import { getTagKeyForEntity, applyTagsOnCharacterSelect } from './tags.js';
 import {
     SECRET_KEYS,
@@ -326,9 +327,6 @@ function RA_checkOnlineStatus() {
         const send_textarea = $('#send_textarea');
         send_textarea.attr('placeholder', send_textarea.attr('no_connection_text')); //Input bar placeholder tells users they are not connected
         $('#send_form').addClass('no-connection');
-        $('#send_but').addClass('displayNone'); //send button is hidden when not connected;
-        $('#mes_continue').addClass('displayNone'); //continue button is hidden when not connected;
-        $('#mes_impersonate').addClass('displayNone'); //continue button is hidden when not connected;
         $('#API-status-top').removeClass('fa-plug');
         $('#API-status-top').addClass('fa-plug-circle-exclamation redOverlayGlow');
         connection_made = false;
@@ -341,14 +339,12 @@ function RA_checkOnlineStatus() {
             $('#API-status-top').addClass('fa-plug');
             connection_made = true;
             retry_delay = 100;
-
-            if (!is_send_press && !(selected_group && is_group_generating)) {
-                $('#send_but').removeClass('displayNone'); //on connect, send button shows
-                $('#mes_continue').removeClass('displayNone'); //continue button is shown when connected
-                $('#mes_impersonate').removeClass('displayNone'); //continue button is shown when connected
-            }
         }
     }
+
+    // A status check can run while a generation is in progress, which used to hide the send
+    // button until another status update happened while idle. Recompute it from the actual state.
+    syncSendButtons();
 }
 //Auto-connect to API (when set to kobold, API URL exists, and auto_connect is true)
 

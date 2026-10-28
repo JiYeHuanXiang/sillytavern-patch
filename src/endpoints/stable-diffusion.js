@@ -11,6 +11,8 @@ import _ from 'lodash';
 import mime from 'mime-types';
 
 import { delay, getBasicAuthHeader, isValidUrl, tryParse } from '../util.js';
+import { assertSafeFetchUrl } from '../url-safety.js';
+import { getUntrustedRequestAgent } from '../private-request-filter.js';
 import { readSecret, SECRET_KEYS } from './secrets.js';
 import { getFileNameValidationFunction } from '../middleware/validateFileName.js';
 import { AIMLAPI_HEADERS } from '../constants.js';
@@ -1449,14 +1451,40 @@ nanogpt.post('/generate', async (request, response) => {
         });
 
         if (!result.ok) {
-            console.warn('NanoGPT returned an error.');
-            return response.sendStatus(500);
+            const errorText = await result.text().catch(() => '');
+            console.warn('NanoGPT returned an error.', result.status, errorText);
+            return response.status(500).send({ error: errorText || `NanoGPT request failed with status ${result.status}` });
         }
 
         /** @type {any} */
         const data = await result.json();
 
-        const image = data?.data?.[0]?.b64_json;
+        let image = data?.data?.[0]?.b64_json;
+
+        // Large images are returned as a URL instead of inline base64.
+        if (!image && typeof data?.data?.[0]?.url === 'string') {
+            const imageUrl = data.data[0].url;
+            try {
+                await assertSafeFetchUrl(imageUrl, { allowPrivate: false });
+                const imageResponse = await fetch(imageUrl, { agent: getUntrustedRequestAgent() });
+                if (!imageResponse.ok) {
+                    throw new Error(`Image download failed with status ${imageResponse.status}`);
+                }
+                const declaredSize = Number(imageResponse.headers.get('content-length'));
+                const maxImageBytes = 25 * 1024 * 1024;
+                if (Number.isFinite(declaredSize) && declaredSize > maxImageBytes) {
+                    throw new Error('Image download is too large.');
+                }
+                const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+                if (imageBuffer.byteLength > maxImageBytes) {
+                    throw new Error('Image download is too large.');
+                }
+                image = imageBuffer.toString('base64');
+            } catch (error) {
+                console.warn('NanoGPT image URL could not be downloaded.', error);
+            }
+        }
+
         if (!image) {
             console.warn('NanoGPT returned invalid data.');
             return response.sendStatus(500);

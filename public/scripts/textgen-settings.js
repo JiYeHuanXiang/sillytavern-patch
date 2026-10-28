@@ -1440,7 +1440,8 @@ function tryParseStreamingError(response, decoded) {
 
     if (message) {
         toastr.error(message, 'Text Completion API');
-        throw new Error(message);
+        // Flag it so the send path does not report the same failure a second time.
+        throw Object.assign(new Error(message), { isApiError: true });
     }
 }
 
@@ -1605,8 +1606,10 @@ export function createTextGenGenerationData(settings, model, finalPrompt = null,
         'logprobs': power_user.request_token_probabilities ? getLogprobsNumber(settings.type) : undefined,
         'temperature': dynatemp ? (settings.min_temp + settings.max_temp) / 2 : settings.temp,
         'top_p': settings.top_p,
-        'typical_p': settings.typical_p,
-        'typical': settings.typical_p,
+        // Recent Ollama releases reject typical sampling parameters. Keep them for
+        // the backends that still support them.
+        'typical_p': settings.type === OLLAMA ? undefined : settings.typical_p,
+        'typical': settings.type === OLLAMA ? undefined : settings.typical_p,
         'sampler_seed': settings.seed >= 0 ? settings.seed : undefined,
         'min_p': settings.min_p,
         'repetition_penalty': settings.rep_pen,

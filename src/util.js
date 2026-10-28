@@ -818,6 +818,17 @@ export async function forwardFetchResponse(from, to) {
             console.info('Streaming request finished');
             to.end();
         });
+
+        // A mid-stream upstream error does not end the piped response, which leaves the browser
+        // waiting on a stream that will never continue. Close the response so the client can settle.
+        from.body.on('error', function (error) {
+            console.error('Streaming request failed mid-stream', error);
+            try {
+                to.end();
+            } catch {
+                // The response was already closed.
+            }
+        });
     } else {
         to.end();
     }

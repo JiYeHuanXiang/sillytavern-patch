@@ -518,6 +518,8 @@ async function sendClaudeRequest(request, response) {
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
+        // Streaming already started: close it, otherwise the client waits forever.
+        response.end();
     }
 }
 
@@ -604,7 +606,7 @@ async function sendMakerSuiteRequest(request, response) {
         const isThinkingConfigModel = m => (/^gemini-2.5-(flash|pro)/.test(m) && !/-image(-preview)?$/.test(m)) || (/^gemini-3[.\d]*-(flash|pro)/.test(m));
         const isImageSizeModel = m => /^gemini-3/.test(m);
         // https://ai.google.dev/gemini-api/docs/latest-model#api-changes-and-parameter-updates
-        const noSamplingModel = /gemini-3\.[67]-flash|gemini-3\.5-flash-lite/.test(model);
+        const noSamplingModel = /gemini-3\.[678]-flash|gemini-3\.5-flash-lite/.test(model);
 
         const noSearchModels = [
             'gemini-2.0-flash-lite',
@@ -867,6 +869,8 @@ async function sendMakerSuiteRequest(request, response) {
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
+        // Streaming already started: close it, otherwise the client waits forever.
+        response.end();
     }
 }
 

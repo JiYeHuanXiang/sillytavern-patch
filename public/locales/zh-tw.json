@@ -1625,6 +1625,7 @@
     "enable_functions_desc_3": "可供多種擴充功能利用，實現更多功能。",
     "Enabled for all entries": "對所有條目啟用",
     "Enabled for chat messages": "啟用聊天訊息向量化",
+    "Limit vector query length": "限制向量查詢長度",
     "Endpoint URL": "端點 URL",
     "Enter a Model ID": "輸入模型 ID",
     "Example: https://****.endpoints.huggingface.cloud": "例如：https://****.endpoints.huggingface.cloud",
@@ -2791,5 +2792,13 @@
     "Loading chat…": "正在載入聊天…",
     "Bulk Delete": "批次刪除",
     "Deleting ${0} character(s)…": "正在刪除 ${0} 個角色…",
-    "Cache hit": "快取命中"
+    "Cache hit": "快取命中",
+    "The API did not start responding in time.": "API 未在逾時時間內開始回應。",
+    "Request timed out": "請求逾時",
+    "The API stopped sending data. Generation was stopped and the partial reply was kept.": "API 已停止傳送資料。生成已終止，已生成的部分內容已保留。",
+    "Generation timed out": "生成逾時",
+    "The request did not stop in time and was force-closed.": "請求未能及時停止，已被強制結束。",
+    "Generation stopped": "生成已停止",
+    "Failed to send message": "傳送訊息失敗",
+    "Unknown error": "未知錯誤"
 }

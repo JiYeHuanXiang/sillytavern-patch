@@ -4383,7 +4383,9 @@ export async function deleteWorldInfo(worldInfoName) {
     if ($('#character_world').val() === worldInfoName) {
         $('#character_world').val('').trigger('change');
         setWorldInfoButtonClass(undefined, false);
-        if (menu_type != 'create') {
+        // The editor form can still hold the previous avatar after that character
+        // was deleted. Saving it would recreate the card using the default image.
+        if (menu_type != 'create' && this_chid !== undefined && characters[this_chid]) {
             saveCharacterDebounced();
         }
     }

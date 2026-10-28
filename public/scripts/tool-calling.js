@@ -619,9 +619,9 @@ export class ToolManager {
             return false;
         }
 
-        // GPT-6 Astra supports tool calling only through the Responses API.
+        // GPT-6 family supports tool calling only through the Responses API.
         if ([chat_completion_sources.OPENAI, chat_completion_sources.AZURE_OPENAI].includes(settings.chat_completion_source)
-            && /^gpt-6-astra/.test(model)) {
+            && /^gpt-6-/.test(model)) {
             return false;
         }
 
